@@ -1,8 +1,8 @@
 streamlit
 yfinance
 pandas
+numpy
 xgboost
 scikit-learn
 opencv-python-headless
 Pillow
-numpy
