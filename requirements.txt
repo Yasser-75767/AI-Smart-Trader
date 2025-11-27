@@ -3,6 +3,6 @@ yfinance
 pandas
 xgboost
 scikit-learn
-opencv-python
+opencv-python-headless
 Pillow
 numpy
