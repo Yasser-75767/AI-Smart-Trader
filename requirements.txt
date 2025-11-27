@@ -3,3 +3,6 @@ yfinance
 pandas
 xgboost
 scikit-learn
+opencv-python
+Pillow
+numpy
