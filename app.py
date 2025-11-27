@@ -42,8 +42,9 @@ with tabs[0]:
         data = yf.download(symbol, start=start_date, end=end_date)
 
         required_cols = ['Open','High','Low','Close','Volume']
-        if data.empty or not all(col in data.columns for col in required_cols):
-            st.warning("⚠️ البيانات غير كافية أو الأعمدة الأساسية مفقودة.")
+        missing_cols = [col for col in required_cols if col not in data.columns]
+        if data.empty or missing_cols:
+            st.warning(f"⚠️ البيانات غير كافية أو الأعمدة التالية مفقودة: {', '.join(missing_cols)}")
         else:
             data['Target'] = data['Close'].shift(-1)
             data = data.dropna(subset=required_cols + ['Target'])
@@ -106,8 +107,8 @@ with tabs[2]:
 
         for sym in symbols_to_check:
             try:
-                df = yf.download(sym, period="2d")
-                if df.empty or len(df)<2:
+                df = yf.download(sym, period="5d")  # استخدام 5 أيام لضمان بيانات
+                if df.empty or len(df) < 2:
                     continue
                 last_row = df.iloc[-1]
                 if pd.notnull(last_row.get('Close')) and pd.notnull(last_row.get('Open')):
