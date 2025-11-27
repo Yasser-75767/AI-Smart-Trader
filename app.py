@@ -21,15 +21,11 @@ all_symbols = low_liquidity_symbols + forex_symbols
 # ===== Sidebar =====
 st.sidebar.header("إعدادات التطبيق")
 symbol = st.sidebar.selectbox("اختر السهم أو زوج الفوركس:", all_symbols)
-start_date = st.sidebar.date_input("تاريخ البداية:", datetime.date(2023,1,1))
+start_date = st.sidebar.date_input("تاريخ البداية:", datetime.date(2023, 1, 1))
 end_date = st.sidebar.date_input("تاريخ النهاية:", datetime.date.today())
 uploaded_file = st.sidebar.file_uploader("ارفع صورة الشموع/المنحنيات للتحليل", type=["png","jpg","jpeg"])
 
-# زر إعادة المحاولة
-if st.sidebar.button("🔄 إعادة المحاولة"):
-    st.experimental_rerun()
-
-# ===== التحقق من التواريخ =====
+# ===== تحقق من التواريخ =====
 if start_date >= end_date:
     st.sidebar.error("⚠ تاريخ البداية يجب أن يكون قبل تاريخ النهاية")
     st.stop()
@@ -37,7 +33,11 @@ if start_date > datetime.date.today():
     st.sidebar.error("⚠ تاريخ البداية لا يمكن أن يكون في المستقبل")
     st.stop()
 
-# ===== تحميل البيانات مع بدائل =====
+# ===== زر إعادة المحاولة =====
+if st.sidebar.button("🔄 إعادة المحاولة"):
+    st.experimental_rerun()
+
+# ===== تحميل البيانات =====
 def load_data(original_symbol, start, end):
     symbol = original_symbol
     max_retries = 3
@@ -48,17 +48,16 @@ def load_data(original_symbol, start, end):
             if df.empty or not all(col in df.columns for col in required_cols):
                 st.warning(f"⚠ لا توجد بيانات كافية للسهم {symbol}. جاري البحث عن بديل...")
                 alternatives = [s for s in all_symbols if s != symbol]
-                if alternatives:
-                    alt = random.choice(alternatives)
+                found = False
+                for alt in alternatives:
                     new_df = yf.download(alt, start=start, end=end)
                     if not new_df.empty and all(col in new_df.columns for col in required_cols):
                         df = new_df
                         symbol = alt
                         st.info(f"✅ تم استخدام الرمز البديل: {symbol}")
+                        found = True
                         break
-                    else:
-                        continue
-                else:
+                if not found:
                     break
             else:
                 break
@@ -77,25 +76,22 @@ def add_target(df):
 # ===== تدريب النموذج =====
 def train_model(df):
     if len(df) < 30:
-        st.warning("⚠ البيانات غير كافية لتدريب نموذج دقيق (تحتاج 30 نقطة على الأقل)")
-        return None, None
+        st.warning("⚠ البيانات غير كافية لتدريب نموذج دقيق")
+        return None, None, None
     df = df.copy()
     df['Price_Range'] = df['High'] - df['Low']
     df['Price_Change'] = df['Close'] - df['Open']
-    df['MA_5'] = df['Close'].rolling(window=5).mean()
-    df['Volume_MA'] = df['Volume'].rolling(window=5).mean()
+    df['MA_5'] = df['Close'].rolling(5).mean()
+    df['Volume_MA'] = df['Volume'].rolling(5).mean()
     df = df.dropna()
     if len(df) < 20:
         st.warning("⚠ البيانات غير كافية بعد تنظيف القيم المفقودة")
-        return None, None
+        return None, None, None
     feature_cols = ['Open','High','Low','Close','Volume','Price_Range','Price_Change','MA_5','Volume_MA']
-    available_cols = [col for col in feature_cols if col in df.columns]
-    X = df[available_cols]
+    feature_cols_used = [col for col in feature_cols if col in df.columns]
+    X = df[feature_cols_used]
     y = df['Target']
     split_point = int(len(df)*0.8)
-    if split_point == 0:
-        st.error("⚠ لا توجد بيانات كافية للتقسيم")
-        return None, None
     X_train, X_test = X[:split_point], X[split_point:]
     y_train, y_test = y[:split_point], y[split_point:]
     try:
@@ -109,20 +105,18 @@ def train_model(df):
         )
         model.fit(X_train, y_train)
         acc = accuracy_score(y_test, model.predict(X_test))
-        return model, acc
+        return model, acc, feature_cols_used
     except Exception as e:
         st.error(f"⚠ خطأ في تدريب النموذج: {e}")
-        return None, None
+        return None, None, None
 
 # ===== التنبؤ =====
-def predict_last(model, df):
-    base_cols = ['Open','High','Low','Close','Volume']
-    feature_cols = base_cols.copy()
-    if 'Price_Range' in df.columns: feature_cols.append('Price_Range')
-    if 'Price_Change' in df.columns: feature_cols.append('Price_Change')
-    if 'MA_5' in df.columns: feature_cols.append('MA_5')
-    if 'Volume_MA' in df.columns: feature_cols.append('Volume_MA')
-    last_row = df[feature_cols].iloc[-1].values.reshape(1,-1)
+def predict_last(model, df, training_cols):
+    missing_cols = [col for col in training_cols if col not in df.columns]
+    if missing_cols:
+        st.warning(f"⚠ الأعمدة التالية ناقصة في بيانات التنبؤ: {missing_cols}")
+        return None
+    last_row = df[training_cols].iloc[-1].values.reshape(1,-1)
     return model.predict(last_row)[0]
 
 # ===== تحليل الصور =====
@@ -144,10 +138,10 @@ def analyze_image(file):
 # ===== عنوان التطبيق =====
 st.title("📈 AI Smart Trader — النسخة النهائية 💜")
 
-# ===== الزر الرئيسي =====
+# ===== عند الضغط على زر التحليل =====
 if st.button("📊 الحصول على التوصيات"):
     st.warning("""
-    ⚠ **تحذير مهم**:
+    ⚠ **تحذير مهم**: 
     - هذه التوصيات لأغراض تعليمية فقط
     - التداول يحمل مخاطر خسارة الأموال
     - استشر مستشاراً مالياً قبل اتخاذ أي قرار
@@ -164,11 +158,14 @@ if st.button("📊 الحصول على التوصيات"):
         if df.empty:
             st.warning("⚠ البيانات غير كافية للتنبؤ.")
             st.stop()
-        model, acc = train_model(df)
+        model, acc, feature_cols_used = train_model(df)
         if model is None:
             st.error("⚠ البيانات غير كافية لتدريب النموذج.")
             st.stop()
-        pred = predict_last(model, df)
+        pred = predict_last(model, df, feature_cols_used)
+        if pred is None:
+            st.error("⚠ لم يتمكن النموذج من التنبؤ بسبب الأعمدة المفقودة")
+            st.stop()
         st.success(f"✔ دقة النموذج على بيانات الاختبار: {acc*100:.2f}%")
         if pred == 1:
             st.success("🔥 التنبؤ: السهم/الزوج سيرتفع — شراء")
@@ -176,12 +173,14 @@ if st.button("📊 الحصول على التوصيات"):
             st.warning("📉 التنبؤ: السهم/الزوج سينخفض — بيع / تجنب")
         st.markdown("### آخر البيانات التاريخية:")
         st.dataframe(df.tail(10))
-        # إحصائيات أساسية
         st.markdown("### 📈 إحصائيات أساسية")
         col1, col2, col3 = st.columns(3)
-        with col1: st.metric("متوسط السعر", f"{df['Close'].mean():.2f}")
-        with col2: st.metric("أعلى سعر", f"{df['High'].max():.2f}")
-        with col3: st.metric("أقل سعر", f"{df['Low'].min():.2f}")
+        with col1:
+            st.metric("متوسط السعر", f"{df['Close'].mean():.2f}")
+        with col2:
+            st.metric("أعلى سعر", f"{df['High'].max():.2f}")
+        with col3:
+            st.metric("أقل سعر", f"{df['Low'].min():.2f}")
         if uploaded_file is not None:
             st.markdown("### تحليل الشموع/المنحنيات من الصورة:")
             img_pred = analyze_image(uploaded_file)
