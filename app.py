@@ -11,21 +11,32 @@ import random
 import datetime
 
 # ===== إعداد الصفحة =====
-st.set_page_config(page_title="AI Smart Trader — النسخة النهائية 💜", layout="wide")
+st.set_page_config(page_title="AI Smart Trader — النسخة الثابتة 💜", layout="wide")
 
-# ===== القوائم =====
-low_liquidity_symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN"]
+# ===== الرموز =====
+stock_symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN"]
 forex_symbols = ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X", "AUDUSD=X"]
-all_symbols = low_liquidity_symbols + forex_symbols
+all_symbols = stock_symbols + forex_symbols
 
-# ===== Sidebar =====
+# الأعمدة التي سنستخدمها دائماً (C)
+FEATURE_COLS = [
+    "Open", "High", "Low", "Close", "Volume",
+    "Price_Range", "Price_Change", "MA_5", "Volume_MA"
+]
+
+# ===== الشريط الجانبي =====
 st.sidebar.header("إعدادات التطبيق")
 symbol = st.sidebar.selectbox("اختر السهم أو زوج الفوركس:", all_symbols)
 start_date = st.sidebar.date_input("تاريخ البداية:", datetime.date(2023, 1, 1))
 end_date = st.sidebar.date_input("تاريخ النهاية:", datetime.date.today())
 uploaded_file = st.sidebar.file_uploader("ارفع صورة الشموع/المنحنيات للتحليل", type=["png", "jpg", "jpeg"])
 
-# ===== التحقق من التواريخ =====
+# زر إعادة المحاولة (لا يُسبب أي خطأ)
+if st.sidebar.button("🔄 إعادة المحاولة"):
+    st.runtime.legacy_caching.clear_cache() if hasattr(st, "runtime") else None
+    st.experimental_rerun()
+
+# التحقق من التواريخ
 if start_date >= end_date:
     st.sidebar.error("⚠ تاريخ البداية يجب أن يكون قبل تاريخ النهاية")
     st.stop()
@@ -33,71 +44,93 @@ if start_date > datetime.date.today():
     st.sidebar.error("⚠ تاريخ البداية لا يمكن أن يكون في المستقبل")
     st.stop()
 
-# ===== تحميل البيانات مع بدائل =====
-def load_data(original_symbol, start, end):
+# ===== تحميل البيانات مع بديل =====
+def load_data_with_fallback(original_symbol, start, end):
     symbol = original_symbol
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            df = yf.download(symbol, start=start, end=end)
-            required_cols = ["Open", "High", "Low", "Close", "Volume"]
-            if df.empty or not all(col in df.columns for col in required_cols):
-                st.warning(f"⚠ لا توجد بيانات كافية للسهم {symbol}. جاري البحث عن بديل...")
-                alternatives = [s for s in all_symbols if s != symbol]
-                if alternatives:
-                    alt = random.choice(alternatives)
-                    new_df = yf.download(alt, start=start, end=end)
-                    if not new_df.empty and all(col in new_df.columns for col in required_cols):
-                        df = new_df
-                        symbol = alt
-                        st.info(f"✅ تم استخدام الرمز البديل: {symbol}")
-                        break
-                    else:
-                        continue
-                else:
-                    break
-            else:
-                break
-        except Exception as e:
-            st.error(f"محاولة {attempt+1} فشلت: {e}")
-            if attempt == max_retries-1:
-                return pd.DataFrame(), original_symbol
-    return df, symbol
+    candidates = [symbol] + [s for s in all_symbols if s != symbol]
 
-# ===== إضافة عمود الهدف =====
-def add_target(df):
-    df['Target'] = (df['Close'].shift(-1) > df['Close']).astype(int)
-    return df.dropna()
+    for sym in candidates:
+        try:
+            df = yf.download(sym, start=start, end=end, progress=False)
+        except Exception:
+            continue
+
+        base_cols = ["Open", "High", "Low", "Close", "Volume"]
+        if df.empty or not all(c in df.columns for c in base_cols):
+            continue
+
+        # تنظيف مبدئي
+        df = df[base_cols].dropna()
+        if len(df) < 10:
+            continue
+
+        if sym != original_symbol:
+            st.info(f"ℹ تم استخدام الرمز البديل: {sym} بدل {original_symbol}")
+        return df, sym
+
+    return pd.DataFrame(), original_symbol
+
+# ===== تجهيز الميزات (نفس الشيء للتدريب والتنبؤ) =====
+def prepare_features(df, with_target=True):
+    df = df.copy()
+
+    # الأعمدة الأساسية يجب أن تكون موجودة
+    base_cols = ["Open", "High", "Low", "Close", "Volume"]
+    if not all(col in df.columns for col in base_cols):
+        return None, None, None
+
+    # إنشاء الهدف قبل كل شيء
+    if with_target:
+        df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
+
+    # حساب الميزات
+    df["Price_Range"] = df["High"] - df["Low"]
+    df["Price_Change"] = df["Close"] - df["Open"]
+    df["MA_5"] = df["Close"].rolling(window=5).mean()
+    df["Volume_MA"] = df["Volume"].rolling(window=5).mean()
+
+    # ملء القيم الناقصة في الميزات
+    for col in FEATURE_COLS:
+        if col not in df.columns:
+            df[col] = 0.0
+    df[FEATURE_COLS] = df[FEATURE_COLS].fillna(0)
+
+    if with_target:
+        # إزالة الصف الأخير الذي لا يوجد له Target صالح
+        df = df.dropna(subset=["Target"])
+        if df.empty:
+            return None, None, None
+
+        X = df[FEATURE_COLS]
+        y = df["Target"].astype(int)
+        return X, y, df
+    else:
+        X = df[FEATURE_COLS]
+        return X, df, None
 
 # ===== تدريب النموذج =====
 def train_model(df):
-    if len(df) < 30:
-        st.warning("⚠ البيانات غير كافية لتدريب نموذج دقيق (تحتاج 30 نقطة على الأقل)")
+    X, y, df_feat = prepare_features(df, with_target=True)
+    if X is None or y is None:
+        st.warning("⚠ البيانات غير كافية لتجهيز الميزات والهدف.")
         return None, None
-    
-    df = df.copy()
-    df['Price_Range'] = df['High'] - df['Low']
-    df['Price_Change'] = df['Close'] - df['Open']
-    df = df.dropna()
-    if len(df) < 20:
-        st.warning("⚠ البيانات غير كافية بعد تنظيف القيم المفقودة")
+
+    if len(X) < 30:
+        st.warning("⚠ البيانات أقل من 30 نقطة، النموذج لن يكون دقيقاً.")
         return None, None
-    
-    feature_cols = ['Open','High','Low','Close','Volume','Price_Range','Price_Change']
-    X = df[feature_cols]
-    y = df['Target']
-    
-    split_point = int(len(df) * 0.8)
+
+    split_point = int(len(X) * 0.8)
     X_train, X_test = X[:split_point], X[split_point:]
     y_train, y_test = y[:split_point], y[split_point:]
-    
+
     try:
         model = xgb.XGBClassifier(
-            n_estimators=100,
+            n_estimators=80,
             max_depth=4,
             learning_rate=0.1,
+            tree_method="hist",
             use_label_encoder=False,
-            eval_metric='logloss',
+            eval_metric="logloss",
             random_state=42
         )
         model.fit(X_train, y_train)
@@ -107,12 +140,15 @@ def train_model(df):
         st.error(f"⚠ خطأ في تدريب النموذج: {e}")
         return None, None
 
-# ===== التنبؤ =====
+# ===== التنبؤ بآخر صف =====
 def predict_last(model, df):
-    feature_cols = ['Open','High','Low','Close','Volume','Price_Range','Price_Change']
-    # إضافة الأعمدة المحسوبة إذا موجودة
-    available_cols = [col for col in feature_cols if col in df.columns]
-    last_row = df[available_cols].iloc[-1].values.reshape(1, -1)
+    X_pred, df_feat, _ = prepare_features(df, with_target=False)
+    if X_pred is None or X_pred.empty:
+        st.warning("⚠ لا توجد بيانات كافية للتنبؤ.")
+        return None
+
+    last_row = X_pred.iloc[[-1]].values  # شكل (1, n_features)
+
     try:
         return model.predict(last_row)[0]
     except Exception as e:
@@ -122,72 +158,85 @@ def predict_last(model, df):
 # ===== تحليل الصور =====
 def analyze_image(file):
     try:
-        image = Image.open(file).convert('RGB')
+        image = Image.open(file).convert("RGB")
+        # تصغير الصورة لتسريع التحليل
+        image = image.resize((256, 256))
         st.image(image, caption="📊 الصورة المحملة", use_column_width=True)
+
         img_cv = np.array(image)
         img_gray = cv2.cvtColor(img_cv, cv2.COLOR_RGB2GRAY)
-        mean_val = np.mean(img_gray)
+
+        mean_val = float(np.mean(img_gray))
+        st.write(f"📊 متوسط الإضاءة في الصورة: {mean_val:.1f}")
+
         return 1 if mean_val > 120 else 0
     except Exception as e:
         st.error(f"⚠ خطأ في تحليل الصورة: {e}")
         return None
 
 # ===== واجهة التطبيق =====
-st.title("📈 AI Smart Trader — النسخة النهائية 💜")
-st.warning("""
-⚠ **تنبيه:**  
-- التوصيات لأغراض تعليمية فقط  
-- التداول يحمل مخاطر مالية  
-- استشر مستشاراً مالياً قبل اتخاذ أي قرار
-""")
+st.title("📈 AI Smart Trader — النسخة الثابتة 💜")
+st.warning(
+    "⚠ التوصيات تعليمية فقط، التداول يحمل مخاطر مالية، استشيري مختصاً قبل أي قرار حقيقي."
+)
 
-# ===== عند الضغط على زر التحليل =====
 if st.button("📊 الحصول على التوصيات"):
-    with st.spinner('⏳ جاري تحميل البيانات وتحليلها...'):
-        df, actual_symbol = load_data(symbol, start_date, end_date)
+    with st.spinner("⏳ جاري تحميل البيانات وتحليلها..."):
+        # تحميل البيانات
+        df, used_symbol = load_data_with_fallback(symbol, start_date, end_date)
         if df.empty:
-            st.error("⚠ لا توجد بيانات لتحليلها.")
-            st.stop()
-        if actual_symbol != symbol:
-            st.info(f"🔁 تم استخدام الرمز {actual_symbol} بدلاً من {symbol}")
-            symbol = actual_symbol
-
-        df = add_target(df)
-        if df.empty:
-            st.warning("⚠ البيانات غير كافية للتنبؤ.")
+            st.error("⚠ لا توجد بيانات كافية لهذا الرمز أو البدائل.")
             st.stop()
 
+        if used_symbol != symbol:
+            st.info(f"🔁 تم استبدال {symbol} بـ {used_symbol} لعدم توفر بيانات كافية.")
+            symbol = used_symbol
+
+        # تدريب النموذج
         model, acc = train_model(df)
         if model is None:
-            st.error("⚠ النموذج لم يتمكن من التدريب بسبب نقص البيانات.")
+            st.error("⚠ لم يتم تدريب النموذج بسبب قلة البيانات.")
             st.stop()
 
+        # التنبؤ
         pred = predict_last(model, df)
         if pred is None:
-            st.error("⚠ لم يتمكن النموذج من التنبؤ")
+            st.error("⚠ لم يتمكن النموذج من التنبؤ.")
             st.stop()
 
         st.success(f"✔ دقة النموذج على بيانات الاختبار: {acc*100:.2f}%")
-        if pred == 1:
-            st.success("🔥 التنبؤ: السهم/الزوج سيرتفع — شراء")
-        else:
-            st.warning("📉 التنبؤ: السهم/الزوج سينخفض — بيع / تجنب")
 
+        if pred == 1:
+            st.success(f"🔥 التنبؤ: {symbol} اتجاهه صاعد (إشارة شراء تعليمية)")
+        else:
+            st.warning(f"📉 التنبؤ: {symbol} اتجاهه هابط أو ضعيف (تجنب الشراء)")
+
+        # عرض آخر البيانات
         st.markdown("### آخر البيانات التاريخية:")
         st.dataframe(df.tail(10))
 
+        # إحصائيات سريعة
+        st.markdown("### 📈 إحصائيات أساسية")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("متوسط الإغلاق", f"{df['Close'].mean():.2f}")
+        with col2:
+            st.metric("أعلى سعر", f"{df['High'].max():.2f}")
+        with col3:
+            st.metric("أقل سعر", f"{df['Low'].min():.2f}")
+
+        # تحليل الصورة إن وُجدت
         if uploaded_file is not None:
-            st.markdown("### تحليل الشموع/المنحنيات من الصورة:")
+            st.markdown("### 📷 تحليل الشموع/المنحنيات من الصورة")
             img_pred = analyze_image(uploaded_file)
             if img_pred == 1:
-                st.success("🔥 تحليل الصورة: السوق صاعد")
+                st.success("🔥 تحليل الصورة: السوق يبدو صاعداً في هذه اللقطة")
             elif img_pred == 0:
-                st.warning("📉 تحليل الصورة: السوق هابط")
+                st.warning("📉 تحليل الصورة: السوق يبدو هابطاً أو ضعيفاً")
             else:
                 st.info("⚠ لم يتمكن التطبيق من تحليل الصورة")
 
-    # ===== توصيات يومية عشوائية =====
-    st.markdown("---")
-    st.subheader("⭐ أفضل الأسهم وأزواج الفوركس للتداول اليومي")
-    today_symbols = random.sample(all_symbols, 5)
-    st.write(today_symbols)
+# ===== توصيات بسيطة عشوائية (تعليمية) =====
+st.markdown("---")
+st.subheader("⭐ رموز مقترحة للمراقبة (تعليميًا)")
+st.write(random.sample(all_symbols, 5))
