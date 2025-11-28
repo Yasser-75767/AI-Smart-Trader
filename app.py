@@ -1,73 +1,74 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import numpy as np
+import yfinance as yf
 from ta.trend import SMAIndicator, EMAIndicator, MACD
 from ta.momentum import RSIIndicator
+import numpy as np
 
-st.title("🎯 AI Smart Trader Pro — النسخة الكاملة النهائية")
+st.title("🎯 AI Smart Trader Pro — النسخة النهائية")
 
-# ---- واجهة المستخدم ----
-symbol = st.selectbox("اختر الأصل:", ["AAPL", "MSFT", "GOOG", "TSLA"])
+# --- واجهة المستخدم ---
+symbol = st.selectbox("اختر الأصل:", ["AAPL","MSFT","GOOG","TSLA"])
 start_date = st.date_input("تاريخ البداية")
 end_date = st.date_input("تاريخ النهاية")
-lookback_min = st.number_input("أيام النظر للخلف (Min)", min_value=5, max_value=40, value=5)
-lookback_max = st.number_input("أيام النظر للخلف (Max)", min_value=5, max_value=40, value=20)
+min_lookback = st.number_input("أيام النظر للخلف (Min)", min_value=1, value=5)
+max_lookback = st.number_input("أيام النظر للخلف (Max)", min_value=min_lookback, value=40)
 confidence = st.slider("حد الثقة لإشارة قوية (%)", min_value=50, max_value=95, value=70)
 
-# ---- زر الحصول على النتائج ----
+# زر الحصول على النتائج
 if st.button("الحصول على النتائج"):
+    # --- جلب البيانات ---
     df = yf.download(symbol, start=start_date, end=end_date)
-
-    if df.empty or len(df) < 5:
-        st.error("اختر فترة زمنية أطول، البيانات غير كافية لحساب المؤشرات.")
+    if df.empty:
+        st.warning("لا توجد بيانات للأصل المحدد!")
     else:
-        # ----- حساب المؤشرات -----
+        # --- تحويل الأعمدة إلى Series 1D ---
+        close = df["Close"].squeeze()
+        volume = df["Volume"].squeeze()
+
+        # --- المؤشرات الفنية ---
         try:
-            df["SMA_5"] = SMAIndicator(df["Close"], window=5).sma_indicator()
-            df["SMA_20"] = SMAIndicator(df["Close"], window=20).sma_indicator()
-            df["EMA_10"] = EMAIndicator(df["Close"], window=10).ema_indicator()
+            df["SMA_5"] = SMAIndicator(close, window=5).sma_indicator()
+            df["SMA_20"] = SMAIndicator(close, window=20).sma_indicator()
+            df["EMA_10"] = EMAIndicator(close, window=10).ema_indicator()
         except Exception as e:
-            st.warning(f"تعذر حساب المتوسطات: {e}")
+            st.error(f"تعذر حساب المتوسطات: {e}")
 
         try:
-            macd = MACD(df["Close"])
+            macd = MACD(close)
             df["MACD"] = macd.macd()
             df["MACD_signal"] = macd.macd_signal()
         except Exception as e:
-            st.warning(f"تعذر حساب MACD: {e}")
+            st.error(f"تعذر حساب MACD: {e}")
 
         try:
-            df["RSI_14"] = RSIIndicator(df["Close"], window=14).rsi()
+            df["RSI_14"] = RSIIndicator(close, window=14).rsi()
         except Exception as e:
-            st.warning(f"تعذر حساب RSI: {e}")
+            st.error(f"تعذر حساب RSI: {e}")
 
         try:
-            df["Volume_SMA"] = SMAIndicator(df["Volume"], window=20).sma_indicator()
-            df["Volume_Ratio"] = df["Volume"] / df["Volume_SMA"].replace(0, np.nan)
+            df["Volume_SMA"] = SMAIndicator(volume, window=20).sma_indicator()
+            df["Volume_Ratio"] = volume / df["Volume_SMA"].replace(0,np.nan)
         except Exception as e:
-            st.warning(f"تعذر حساب Volume Ratio: {e}")
+            st.error(f"تعذر حساب Volume Ratio: {e}")
 
-        # ----- إشارات تداول مبسطة -----
-        signals = []
-        for i in range(len(df)):
-            signal = ""
-            if not pd.isna(df["MACD"].iloc[i]) and not pd.isna(df["MACD_signal"].iloc[i]):
-                if df["MACD"].iloc[i] > df["MACD_signal"].iloc[i]:
-                    signal = f"شراء (ثقة {confidence}%)"
-                elif df["MACD"].iloc[i] < df["MACD_signal"].iloc[i]:
-                    signal = f"بيع (ثقة {confidence}%)"
-            signals.append(signal)
-        df["Signal"] = signals
+        # --- إشارات التداول ---
+        if "MACD" in df.columns and "MACD_signal" in df.columns:
+            signals = []
+            for i in range(len(df)):
+                if not pd.isna(df["MACD"].iloc[i]) and not pd.isna(df["MACD_signal"].iloc[i]):
+                    if df["MACD"].iloc[i] > df["MACD_signal"].iloc[i]:
+                        signals.append("شراء")
+                    else:
+                        signals.append("بيع")
+                else:
+                    signals.append("")
+            df["Signal"] = signals
 
-        # ----- عرض النتائج -----
-        st.subheader("البيانات الأخيرة")
-        st.dataframe(df.tail(10))
+        # --- عرض النتائج ---
+        st.subheader("📈 بيانات الأسعار والمؤشرات")
+        st.line_chart(df[["Close","SMA_5","SMA_20","EMA_10"]].tail(150))
 
-        st.subheader("رسم السعر والمتوسطات المتحركة")
-        st.line_chart(df[["Close", "SMA_5", "SMA_20", "EMA_10"]].dropna())
-
-        st.subheader("إشارات التداول")
-        st.dataframe(df[["Close", "MACD", "MACD_signal", "RSI_14", "Volume_Ratio", "Signal"]].tail(10))
-
-        st.success("تم الحساب بنجاح ✅")
+        if "Signal" in df.columns:
+            st.subheader("🎯 إشارات التداول")
+            st.dataframe(df[["Close","MACD","MACD_signal","RSI_14","Signal"]].tail(50))
