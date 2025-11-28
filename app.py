@@ -187,15 +187,21 @@ if st.button("📊 الحصول على التوصيات"):
             
             st.success(f"📊 تم تحميل {len(df)} يوم تداول للرمز {used_symbol}")
             
-            # عرض معلومات أساسية عن البيانات
+            # عرض معلومات أساسية عن البيانات - الإصلاح هنا
             st.write("### 📈 معلومات أساسية عن البيانات:")
             col1, col2, col3 = st.columns(3)
+            
+            # حساب القيم بشكل آمن
+            avg_close = float(df['Close'].mean())
+            high_max = float(df['High'].max())
+            low_min = float(df['Low'].min())
+            
             with col1:
-                st.metric("متوسط الإغلاق", f"{df['Close'].mean():.2f}")
+                st.metric("متوسط الإغلاق", f"{avg_close:.2f}")
             with col2:
-                st.metric("أعلى سعر", f"{df['High'].max():.2f}")
+                st.metric("أعلى سعر", f"{high_max:.2f}")
             with col3:
-                st.metric("أقل سعر", f"{df['Low'].min():.2f}")
+                st.metric("أقل سعر", f"{low_min:.2f}")
             
             # تدريب النموذج
             model, acc = train_model(df)
