@@ -2,8 +2,8 @@ streamlit
 yfinance
 pandas
 numpy
-xgboost
 scikit-learn
-Pillow
-opencv-python-headless
-streamlit_autorefresh
+xgboost
+pillow
+opencv-python
+ta
