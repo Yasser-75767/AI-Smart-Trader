@@ -1,8 +1,8 @@
-pip install streamlit
-pip install yfinance
-pip install pandas
-pip install numpy
-pip install scikit-learn
-pip install xgboost
-pip install pillow
-pip install ta
+streamlit
+yfinance
+pandas
+numpy
+scikit-learn
+xgboost
+pillow
+ta
