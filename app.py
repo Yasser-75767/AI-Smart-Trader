@@ -2,48 +2,72 @@ import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from ta.trend import SMAIndicator, MACD
+from ta.trend import SMAIndicator, EMAIndicator, MACD
+from ta.momentum import RSIIndicator
 
-# --- واجهة التطبيق الأصلية ---
-st.title("🎯 AI Smart Trader Pro — النسخة النهائية")
-st.subheader("تحليل الأسهم باستخدام الذكاء الاصطناعي")
+st.title("🎯 AI Smart Trader Pro — النسخة الكاملة النهائية")
 
-# --- إدخالات المستخدم ---
-symbol = st.selectbox("اختر الأصل:", ["AAPL", "TSLA", "GOOGL", "MSFT"])
+# ---- واجهة المستخدم ----
+symbol = st.selectbox("اختر الأصل:", ["AAPL", "MSFT", "GOOG", "TSLA"])
 start_date = st.date_input("تاريخ البداية")
 end_date = st.date_input("تاريخ النهاية")
-lookback = st.slider("أيام النظر للخلف:", min_value=5, max_value=40, value=20)
-confidence = st.slider("حد الثقة لإشارة قوية (%):", min_value=50, max_value=95, value=70)
+lookback_min = st.number_input("أيام النظر للخلف (Min)", min_value=5, max_value=40, value=5)
+lookback_max = st.number_input("أيام النظر للخلف (Max)", min_value=5, max_value=40, value=20)
+confidence = st.slider("حد الثقة لإشارة قوية (%)", min_value=50, max_value=95, value=70)
 
-# --- جلب البيانات ---
-df = yf.download(symbol, start=start_date, end=end_date)
-df.reset_index(inplace=True)
+# ---- زر الحصول على النتائج ----
+if st.button("الحصول على النتائج"):
+    df = yf.download(symbol, start=start_date, end=end_date)
 
-# --- التأكد من عدم وجود قيم مفقودة ---
-df.fillna(method='ffill', inplace=True)
+    if df.empty or len(df) < 5:
+        st.error("اختر فترة زمنية أطول، البيانات غير كافية لحساب المؤشرات.")
+    else:
+        # ----- حساب المؤشرات -----
+        try:
+            df["SMA_5"] = SMAIndicator(df["Close"], window=5).sma_indicator()
+            df["SMA_20"] = SMAIndicator(df["Close"], window=20).sma_indicator()
+            df["EMA_10"] = EMAIndicator(df["Close"], window=10).ema_indicator()
+        except Exception as e:
+            st.warning(f"تعذر حساب المتوسطات: {e}")
 
-# --- حساب المتوسطات المتحركة ---
-df["SMA_5"] = SMAIndicator(df["Close"], window=5).sma_indicator()
-df["SMA_20"] = SMAIndicator(df["Close"], window=20).sma_indicator()
-df["SMA_50"] = SMAIndicator(df["Close"], window=50).sma_indicator()
+        try:
+            macd = MACD(df["Close"])
+            df["MACD"] = macd.macd()
+            df["MACD_signal"] = macd.macd_signal()
+        except Exception as e:
+            st.warning(f"تعذر حساب MACD: {e}")
 
-# --- حساب MACD ---
-macd_indicator = MACD(df["Close"])
-df["MACD"] = macd_indicator.macd()
+        try:
+            df["RSI_14"] = RSIIndicator(df["Close"], window=14).rsi()
+        except Exception as e:
+            st.warning(f"تعذر حساب RSI: {e}")
 
-# --- حساب نسبة الحجم ---
-df["Volume_SMA"] = df["Volume"].rolling(window=20).mean().replace(0, np.nan)
-df["Volume_Ratio"] = df["Volume"] / df["Volume_SMA"]
+        try:
+            df["Volume_SMA"] = SMAIndicator(df["Volume"], window=20).sma_indicator()
+            df["Volume_Ratio"] = df["Volume"] / df["Volume_SMA"].replace(0, np.nan)
+        except Exception as e:
+            st.warning(f"تعذر حساب Volume Ratio: {e}")
 
-# --- عرض النتائج ---
-st.subheader("📈 السعر + المتوسطات المتحركة")
-st.line_chart(df[["Close", "SMA_20", "SMA_50"]].tail(150))
+        # ----- إشارات تداول مبسطة -----
+        signals = []
+        for i in range(len(df)):
+            signal = ""
+            if not pd.isna(df["MACD"].iloc[i]) and not pd.isna(df["MACD_signal"].iloc[i]):
+                if df["MACD"].iloc[i] > df["MACD_signal"].iloc[i]:
+                    signal = f"شراء (ثقة {confidence}%)"
+                elif df["MACD"].iloc[i] < df["MACD_signal"].iloc[i]:
+                    signal = f"بيع (ثقة {confidence}%)"
+            signals.append(signal)
+        df["Signal"] = signals
 
-st.subheader("💹 إشارات التداول")
-if df["MACD"].iloc[-1] > 0 and df["Close"].iloc[-1] > df["SMA_20"].iloc[-1]:
-    st.success("إشارة شراء قوية ✅")
-else:
-    st.warning("إشارة للبيع ⚠️")
+        # ----- عرض النتائج -----
+        st.subheader("البيانات الأخيرة")
+        st.dataframe(df.tail(10))
 
-st.subheader("🔢 بيانات الحجم")
-st.line_chart(df[["Volume", "Volume_SMA", "Volume_Ratio"]].tail(150))
+        st.subheader("رسم السعر والمتوسطات المتحركة")
+        st.line_chart(df[["Close", "SMA_5", "SMA_20", "EMA_10"]].dropna())
+
+        st.subheader("إشارات التداول")
+        st.dataframe(df[["Close", "MACD", "MACD_signal", "RSI_14", "Volume_Ratio", "Signal"]].tail(10))
+
+        st.success("تم الحساب بنجاح ✅")
