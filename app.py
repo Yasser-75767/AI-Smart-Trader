@@ -1,49 +1,44 @@
-# AI Smart Trader Pro — النسخة النهائية مع إشارات التداول
+# AI Smart Trader Pro — نسخة مصححة
 import yfinance as yf
 import pandas as pd
-from ta.trend import SMAIndicator, EMAIndicator
 import streamlit as st
-import datetime
+from ta.trend import SMAIndicator, EMAIndicator
 
-# --- واجهة Streamlit ---
-st.title("🎯 AI Smart Trader Pro — النسخة النهائية مع إشارات التداول")
+st.title("🎯 AI Smart Trader Pro — النسخة المصححة")
 
-# اختيار الأصل (رمز السهم)
-symbol = st.selectbox("اختر الأصل (رمز السهم)", ["AAPL", "MSFT", "GOOGL", "AMZN"])
-
-# اختيار التواريخ
-start_date = st.date_input("تاريخ البداية", datetime.date(2020, 11, 28))
-end_date = st.date_input("تاريخ النهاية", datetime.date(2025, 11, 28))
-
-# إعدادات المؤشرات
-min_lookback = st.number_input("أيام النظر للخلف (Min)", min_value=1, max_value=100, value=5)
-max_lookback = st.number_input("أيام النظر للخلف (Max)", min_value=min_lookback, max_value=100, value=40)
-
-confidence_min = st.number_input("حد الثقة لإشارة قوية (Min %)", min_value=0, max_value=100, value=0)
-confidence_max = st.number_input("حد الثقة لإشارة قوية (Max %)", min_value=confidence_min, max_value=100, value=100)
+# --- إعدادات المستخدم ---
+symbol = st.selectbox("اختر الأصل (رمز السهم)", ["AAPL","MSFT","GOOGL"])
+start_date = st.date_input("تاريخ البداية", pd.to_datetime("2020-11-28"))
+end_date = st.date_input("تاريخ النهاية", pd.to_datetime("2025-11-28"))
+min_back = st.number_input("أيام النظر للخلف (Min)", min_value=1, value=5)
+max_back = st.number_input("أيام النظر للخلف (Max)", min_value=1, value=40)
+conf_min = st.slider("حد الثقة لإشارة قوية (Min %)", 0, 100, 0)
+conf_max = st.slider("حد الثقة لإشارة قوية (Max %)", 0, 100, 100)
 
 # --- جلب البيانات ---
 df = yf.download(symbol, start=start_date, end=end_date)
 
 if df.empty:
-    st.warning("لا توجد بيانات لهذا السهم أو للفترة المحددة.")
+    st.error("لا توجد بيانات لهذا الرمز.")
 else:
-    # تأكد أن العمود Close هو 1D
+    # التأكد من أن Close هو Series 1D
     df['Close'] = df['Close'].squeeze()
 
-    # --- حساب المتوسطات ---
-    try:
-        df['SMA_5'] = SMAIndicator(df['Close'], window=5).sma_indicator()
-        df['SMA_20'] = SMAIndicator(df['Close'], window=20).sma_indicator()
-        df['EMA_10'] = EMAIndicator(df['Close'], window=10).ema_indicator()
-    except Exception as e:
-        st.error(f"خطأ في حساب المؤشرات: {e}")
+    # حساب المؤشرات
+    df['SMA_5'] = SMAIndicator(df['Close'], window=5).sma_indicator()
+    df['SMA_20'] = SMAIndicator(df['Close'], window=20).sma_indicator()
+    df['EMA_10'] = EMAIndicator(df['Close'], window=10).ema_indicator()
 
-    # --- تحضير الأعمدة للرسم ---
+    # إنشاء إشارات شراء وبيع بسيطة
+    df['Signal'] = 0
+    df.loc[df['SMA_5'] > df['SMA_20'], 'Signal'] = 1  # شراء
+    df.loc[df['SMA_5'] < df['SMA_20'], 'Signal'] = -1 # بيع
+
+    # الأعمدة للرسم
     columns_to_plot = [col for col in ['Close','SMA_5','SMA_20','EMA_10'] if col in df.columns]
 
-    if columns_to_plot:
-        st.subheader("📊 بيانات الأسعار والمتوسطات")
-        st.line_chart(df[columns_to_plot].tail(150))
-    else:
-        st.warning("لا توجد أعمدة صحيحة للرسم البياني")
+    st.subheader("📈 بيانات الأسعار والمؤشرات")
+    st.line_chart(df[columns_to_plot].tail(150))
+
+    st.subheader("💹 إشارات التداول")
+    st.write(df[['Close','SMA_5','SMA_20','EMA_10','Signal']].tail(20))
