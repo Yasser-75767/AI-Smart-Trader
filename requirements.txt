@@ -4,5 +4,6 @@ pandas
 numpy
 xgboost
 scikit-learn
-opencv-python-headless
 Pillow
+opencv-python-headless
+streamlit_autorefresh
