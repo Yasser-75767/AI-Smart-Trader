@@ -6,7 +6,7 @@ from ta.trend import SMAIndicator, EMAIndicator, MACD
 from ta.momentum import RSIIndicator
 
 st.set_page_config(page_title="🎯 AI Smart Trader Pro", layout="wide")
-st.title("🎯 AI Smart Trader Pro — النسخة النهائية")
+st.title("🎯 AI Smart Trader Pro — النسخة النهائية مع إشارات التداول")
 st.markdown("تحليل الأسهم باستخدام الذكاء الاصطناعي")
 
 # -------------------------------
@@ -24,17 +24,11 @@ confidence_max = st.slider("حد الثقة لإشارة قوية (%)", min_valu
 # زر الحساب
 # -------------------------------
 if st.button("الحصول على النتائج"):
-    # -------------------------------
-    # تحميل البيانات
-    # -------------------------------
     df = yf.download(symbol, start=start_date, end=end_date)
     
     if df.empty:
         st.error("لا توجد بيانات لهذا المدى الزمني.")
     else:
-        # -------------------------------
-        # تحويل الأعمدة إلى Series 1D
-        # -------------------------------
         close = df["Close"].squeeze()
         volume = df["Volume"].squeeze()
 
@@ -67,7 +61,26 @@ if st.button("الحصول على النتائج"):
             st.warning(f"تعذر حساب Volume Ratio: {e}")
 
         # -------------------------------
-        # الرسوم البيانية (الأعمدة الموجودة فقط)
+        # إشارات التداول
+        # -------------------------------
+        signals = []
+        if "MACD" in df.columns and "MACD_signal" in df.columns and "RSI" in df.columns:
+            for i in range(len(df)):
+                if not pd.isna(df["MACD"].iloc[i]) and not pd.isna(df["MACD_signal"].iloc[i]) and not pd.isna(df["RSI"].iloc[i]):
+                    if df["MACD"].iloc[i] > df["MACD_signal"].iloc[i] and df["RSI"].iloc[i] < 30:
+                        signals.append("Buy")
+                    elif df["MACD"].iloc[i] < df["MACD_signal"].iloc[i] and df["RSI"].iloc[i] > 70:
+                        signals.append("Sell")
+                    else:
+                        signals.append("Hold")
+                else:
+                    signals.append("Hold")
+            df["Signal"] = signals
+        else:
+            st.warning("لا يمكن حساب إشارات التداول بسبب نقص البيانات.")
+
+        # -------------------------------
+        # الرسم البياني للأسعار والمتوسطات
         # -------------------------------
         columns_to_plot = ["Close", "SMA_5", "SMA_20", "EMA_10"]
         existing_columns = [col for col in columns_to_plot if col in df.columns]
@@ -78,7 +91,8 @@ if st.button("الحصول على النتائج"):
             st.warning("لا توجد أعمدة صالحة للرسم البياني.")
 
         # -------------------------------
-        # جدول بيانات أخير
+        # جدول إشارات التداول
         # -------------------------------
-        st.subheader("🗂️ آخر 10 صفوف من البيانات")
-        st.dataframe(df.tail(10))
+        if "Signal" in df.columns:
+            st.subheader("🟢 إشارات التداول")
+            st.dataframe(df[["Close","MACD","MACD_signal","RSI","Signal"]].tail(50))
