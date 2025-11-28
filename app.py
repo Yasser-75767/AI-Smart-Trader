@@ -130,25 +130,31 @@ def analyze_image_advanced(file):
         st.image(image, caption="📊 الصورة المحملة", use_column_width=False, width=300)
         gray_image = image.convert('L')
         stat = ImageStat.Stat(gray_image)
-        mean_brightness = stat.mean[0]
-        std_brightness = stat.stddev[0]
+        mean_brightness = float(stat.mean[0])  # تحويل إلى float
+        std_brightness = float(stat.stddev[0])  # تحويل إلى float
         edges = image.filter(ImageFilter.FIND_EDGES)
         edge_stat = ImageStat.Stat(edges.convert('L'))
-        edge_intensity = edge_stat.mean[0]
+        edge_intensity = float(edge_stat.mean[0])  # تحويل إلى float
         contrast = image.filter(ImageFilter.CONTOUR)
         contrast_stat = ImageStat.Stat(contrast.convert('L'))
-        contrast_level = contrast_stat.mean[0]
+        contrast_level = float(contrast_stat.mean[0])  # تحويل إلى float
+        
         score = 0
         if mean_brightness > 130: score += 1
         if edge_intensity > 30: score += 1
         if std_brightness > 40: score += 1
         if contrast_level > 50: score += 1
+        
         st.write("**📈 تحليل الصورة المتقدم:**")
         col1, col2, col3, col4 = st.columns(4)
-        with col1: st.metric("متوسط الإضاءة", f"{mean_brightness:.1f}")
-        with col2: st.metric("شدة الحواف", f"{edge_intensity:.1f}")
-        with col3: st.metric("التباين", f"{std_brightness:.1f}")
-        with col4: st.metric("التفاصيل", f"{contrast_level:.1f}")
+        with col1: 
+            st.metric("متوسط الإضاءة", f"{mean_brightness:.1f}")
+        with col2: 
+            st.metric("شدة الحواف", f"{edge_intensity:.1f}")
+        with col3: 
+            st.metric("التباين", f"{std_brightness:.1f}")
+        with col4: 
+            st.metric("التفاصيل", f"{contrast_level:.1f}")
         return 1 if score >= 2 else 0, score
     except Exception as e:
         st.error(f"⚠ خطأ في تحليل الصورة: {str(e)}")
@@ -162,36 +168,67 @@ if st.button("🚀 بدء التحليل الدقيق"):
     with st.spinner("🔬 جاري التحليل المتعمق..."):
         try:
             data, used_symbol = load_data(symbol, start_date, end_date)
-            if data.empty: st.stop()
+            if data.empty: 
+                st.stop()
+            
             st.success(f"✅ تم تحميل {len(data)} يوم تداول لـ {used_symbol}")
             
+            # عرض إحصائيات أساسية
             st.write("### 📊 الإحصائيات الأساسية:")
             col1, col2, col3 = st.columns(3)
-            with col1: st.metric("متوسط الإغلاق", f"{data['Close'].mean():.2f}")
-            with col2: st.metric("أعلى سعر", f"{data['High'].max():.2f}")
-            with col3: st.metric("أقل سعر", f"{data['Low'].min():.2f}")
             
+            with col1: 
+                avg_close = float(data['Close'].mean())  # تحويل إلى float
+                st.metric("متوسط الإغلاق", f"{avg_close:.2f}")
+            with col2: 
+                high_max = float(data['High'].max())  # تحويل إلى float
+                st.metric("أعلى سعر", f"{high_max:.2f}")
+            with col3: 
+                low_min = float(data['Low'].min())  # تحويل إلى float
+                st.metric("أقل سعر", f"{low_min:.2f}")
+            
+            # مؤشرات فنية حالية
             st.write("### 📈 المؤشرات الفنية الحالية:")
             col4, col5, col6 = st.columns(3)
+            
             with col4:
                 current_rsi = ta.momentum.RSIIndicator(data['Close']).rsi().iloc[-1]
-                st.metric("RSI", f"{current_rsi:.1f}")
+                if pd.notna(current_rsi):
+                    st.metric("RSI", f"{float(current_rsi):.1f}")  # تحويل إلى float
+                else:
+                    st.metric("RSI", "N/A")
+            
             with col5:
-                current_price = data['Close'].iloc[-1]
+                current_price = float(data['Close'].iloc[-1])  # تحويل إلى float
                 ma_50 = data['Close'].rolling(50).mean().iloc[-1]
-                trend = "📈 فوق" if current_price > ma_50 else "📉 تحت"
-                st.metric("الاتجاه vs المتوسط 50", trend)
+                if pd.notna(ma_50):
+                    ma_50 = float(ma_50)  # تحويل إلى float
+                    st.metric("السعر الحالي", f"{current_price:.2f}")
+                    if current_price > ma_50:
+                        st.success("فوق المتوسط 50 📈")
+                    else:
+                        st.error("تحت المتوسط 50 📉")
+                else:
+                    st.metric("السعر الحالي", f"{current_price:.2f}")
+            
             with col6:
                 volatility = data['Close'].pct_change().std() * 100
-                st.metric("التقلب", f"{volatility:.2f}%")
+                if pd.notna(volatility):
+                    st.metric("التقلب", f"{float(volatility):.2f}%")  # تحويل إلى float
+                else:
+                    st.metric("التقلب", "N/A")
             
+            # تدريب النموذج
             model, accuracy, scaler = train_advanced_model(data)
-            if model is None: st.stop()
+            if model is None: 
+                st.stop()
             
+            # التنبؤ
             prediction, confidence = predict_with_confidence(model, scaler, data)
             if prediction is not None:
                 st.write("### 🎯 نتائج التحليل الدقيق:")
                 result_col1, result_col2 = st.columns(2)
+                
                 with result_col1:
                     if prediction == 1:
                         st.success("**الاتجاه: 📈 صاعد**")
@@ -199,13 +236,16 @@ if st.button("🚀 بدء التحليل الدقيق"):
                     else:
                         st.error("**الاتجاه: 📉 هابط**")
                         st.progress(0.2)
+                
                 with result_col2:
                     if confidence >= confidence_threshold:
                         st.success(f"**درجة الثقة: {confidence:.1f}%** ✅")
                     else:
                         st.warning(f"**درجة الثقة: {confidence:.1f}%** ⚠️")
+                
                 st.info(f"**دقة النموذج: {accuracy*100:.2f}%**")
                 
+                # توصيات
                 st.write("### 💡 التوصيات:")
                 if prediction == 1 and confidence >= confidence_threshold:
                     st.success("**إشارة شراء قوية:** اتجاه صاعد مع ثقة عالية - فرصة جيدة للدخول في صفقة")
@@ -214,12 +254,16 @@ if st.button("🚀 بدء التحليل الدقيق"):
                 else:
                     st.warning("**إشارة محايدة:** الثقة غير كافية - الانتظار أفضل خيار")
             
+            # تحليل الصورة
             if uploaded_file is not None:
                 st.write("### 📷 تحليل الصورة المتقدم:")
                 image_pred, image_score = analyze_image_advanced(uploaded_file)
-                if image_pred == 1: st.success(f"**نتيجة الصورة: 📈 إيجابية (درجة: {image_score}/4)**")
-                elif image_pred == 0: st.error(f"**نتيجة الصورة: 📉 سلبية (درجة: {image_score}/4)**")
+                if image_pred == 1: 
+                    st.success(f"**نتيجة الصورة: 📈 إيجابية (درجة: {image_score}/4)**")
+                elif image_pred == 0: 
+                    st.error(f"**نتيجة الصورة: 📉 سلبية (درجة: {image_score}/4)**")
             
+            # عرض البيانات
             with st.expander("📋 عرض البيانات الكاملة"):
                 st.dataframe(data.tail(10))
                 st.write("**آخر 100 يوم تداول:**")
