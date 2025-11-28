@@ -1,8 +1,5 @@
-streamlit==1.28.0
-yfinance==0.2.30
-pandas==2.1.0
-numpy==1.26.0
-xgboost==1.7.6
-scikit-learn==1.3.0
-pillow==10.1.0
-ta==0.10.2
+streamlit
+yfinance
+pandas
+numpy
+scikit-learn
