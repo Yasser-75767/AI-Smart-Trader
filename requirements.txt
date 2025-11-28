@@ -2,8 +2,7 @@ streamlit
 yfinance
 pandas
 numpy
-scikit-learn
 xgboost
+scikit-learn
 pillow
-opencv-python
 ta
