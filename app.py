@@ -1,4 +1,4 @@
-# AI Smart Trader Pro — النسخة النهائية بدون أخطاء 1D vs 2D
+# AI Smart Trader Pro — النسخة النهائية بدون خطأ rolling
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -28,17 +28,18 @@ df = load_data(symbol, start_date, end_date)
 
 # ---- حساب المؤشرات ----
 try:
-    df['SMA_5'] = SMAIndicator(df['Close'].values.flatten(), window=5).sma_indicator()
-    df['SMA_20'] = SMAIndicator(df['Close'].values.flatten(), window=20).sma_indicator()
-    df['EMA_10'] = EMAIndicator(df['Close'].values.flatten(), window=10).ema_indicator()
+    # استخدم Series مباشرة بدون تحويل إلى ndarray
+    df['SMA_5'] = SMAIndicator(df['Close'], window=5).sma_indicator()
+    df['SMA_20'] = SMAIndicator(df['Close'], window=20).sma_indicator()
+    df['EMA_10'] = EMAIndicator(df['Close'], window=10).ema_indicator()
     
-    macd = MACD(df['Close'].values.flatten())
+    macd = MACD(df['Close'])
     df['MACD'] = macd.macd()
     df['MACD_signal'] = macd.macd_signal()
     
-    df['RSI'] = RSIIndicator(df['Close'].values.flatten()).rsi()
+    df['RSI'] = RSIIndicator(df['Close']).rsi()
     
-    df['Volume_SMA'] = SMAIndicator(df['Volume'].values.flatten(), window=20).sma_indicator()
+    df['Volume_SMA'] = SMAIndicator(df['Volume'], window=20).sma_indicator()
     df['Volume_Ratio'] = df['Volume'] / df['Volume_SMA'].replace(0, np.nan)
     
     indicators_error = None
@@ -50,7 +51,6 @@ if st.button("📊 الحصول على النتائج"):
     if indicators_error:
         st.error(f"خطأ في حساب المؤشرات: {indicators_error}")
     else:
-        # ---- عرض البيانات ----
         st.subheader("📈 بيانات الأسعار والمؤشرات")
         columns_to_plot = ['Close','SMA_5','SMA_20','EMA_10']
         existing_columns = [col for col in columns_to_plot if col in df.columns]
