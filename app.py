@@ -1,370 +1,198 @@
-# app_final.py
+# app_mobile_final.py — AI Smart Trader نسخة الهاتف النهائية
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import xgboost as xgb
 from sklearn.metrics import accuracy_score
-from sklearn.model_selection import TimeSeriesSplit
-from sklearn.preprocessing import StandardScaler
-from PIL import Image, ImageFilter, ImageStat
 import datetime
 import random
 import ta
+from PIL import Image
 
 # ===== إعداد الصفحة =====
-st.set_page_config(page_title="AI Smart Trader — النسخة الدقيقة جداً 💎", layout="wide")
+st.set_page_config(page_title="AI Smart Trader — الهاتف النهائي 💜", layout="wide")
 
 # ===== الرموز =====
-stock_symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN", "TSLA", "META", "NFLX"]
+stock_symbols = ["AAPL", "MSFT", "GOOGL", "NVDA", "AMZN"]
 forex_symbols = ["EURUSD=X", "USDJPY=X", "GBPUSD=X", "USDCHF=X", "AUDUSD=X"]
 all_symbols = stock_symbols + forex_symbols
 
+# الأعمدة الأساسية + مؤشرات
+FEATURE_COLS = [
+    "Open","High","Low","Close","Volume",
+    "Price_Range","Price_Change","MA_5","MA20","MA50","Volume_MA",
+    "RSI","MACD","MACD_Signal","BB_Upper","BB_Lower"
+]
+
 # ===== الشريط الجانبي =====
 st.sidebar.header("إعدادات التطبيق")
-symbol = st.sidebar.selectbox("اختر السهم أو الزوج:", all_symbols)
-start_date = st.sidebar.date_input("تاريخ البداية:", datetime.date(2020, 1, 1))
+symbol = st.sidebar.selectbox("اختر سهم أو زوج الفوركس:", all_symbols)
+start_date = st.sidebar.date_input("تاريخ البداية:", datetime.date(2023,1,1))
 end_date = st.sidebar.date_input("تاريخ النهاية:", datetime.date.today())
+uploaded_file = st.sidebar.file_uploader("📷 ارفع صورة الشموع/المنحنيات للتحليل", type=["png","jpg","jpeg"])
 
-confidence_threshold = st.sidebar.slider("حد الثقة (%)", 50, 95, 80)
-uploaded_file = st.sidebar.file_uploader("رفع صورة الشموع/المنحنيات للتحليل", type=["png","jpg","jpeg"])
+# ===== دوال التحليل الفني =====
+def add_indicators(df):
+    df = df.copy()
+    df["Price_Range"] = df["High"] - df["Low"]
+    df["Price_Change"] = df["Close"] - df["Open"]
+    df["MA_5"] = df["Close"].rolling(5, min_periods=1).mean()
+    df["MA20"] = df["Close"].rolling(20, min_periods=1).mean()
+    df["MA50"] = df["Close"].rolling(50, min_periods=1).mean()
+    df["Volume_MA"] = df["Volume"].rolling(5, min_periods=1).mean()
 
-# ===== دوال محسنة بدون cv2 =====
+    df['RSI'] = ta.momentum.RSIIndicator(df['Close'], window=14).rsi()
+    macd = ta.trend.MACD(df['Close'])
+    df['MACD'] = macd.macd()
+    df['MACD_Signal'] = macd.macd_signal()
+    bb = ta.volatility.BollingerBands(df['Close'], window=20, window_dev=2)
+    df['BB_Upper'] = bb.bollinger_hband()
+    df['BB_Lower'] = bb.bollinger_lband()
 
+    df[FEATURE_COLS] = df[FEATURE_COLS].fillna(0)
+    return df
+
+# ===== تحميل البيانات =====
 def load_data(symbol, start, end):
-    """تحميل بيانات محسنة"""
     try:
-        data = yf.download(symbol, start=start, end=end, progress=False)
-        if data.empty or len(data) < 100:
-            st.error("❌ البيانات غير كافية. تحتاج 100 يوم على الأقل")
+        df = yf.download(symbol, start=start, end=end, progress=False)
+        if df.empty or len(df) < 10:
+            for alt in [s for s in all_symbols if s != symbol]:
+                df_alt = yf.download(alt, start=start, end=end, progress=False)
+                if not df_alt.empty and len(df_alt) >= 10:
+                    st.info(f"ℹ تم استخدام الرمز البديل: {alt}")
+                    return add_indicators(df_alt), alt
             return pd.DataFrame(), symbol
-        return data, symbol
+        return add_indicators(df), symbol
     except Exception as e:
-        st.error(f"❌ خطأ في التحميل: {e}")
+        st.error(f"⚠ خطأ في تحميل البيانات: {e}")
         return pd.DataFrame(), symbol
 
-def calculate_advanced_indicators(data):
-    """حساب مؤشرات فنية متقدمة"""
-    data = data.copy()
-    
-    # المتوسطات المتحركة
-    for period in [5, 10, 20, 50]:
-        data[f'MA_{period}'] = data['Close'].rolling(period).mean()
-    
-    # RSI
-    data['RSI'] = ta.momentum.RSIIndicator(data['Close'], window=14).rsi()
-    
-    # MACD
-    macd = ta.trend.MACD(data['Close'])
-    data['MACD'] = macd.macd()
-    data['MACD_Signal'] = macd.macd_signal()
-    
-    # Bollinger Bands
-    bollinger = ta.volatility.BollingerBands(data['Close'])
-    data['BB_Upper'] = bollinger.bollinger_hband()
-    data['BB_Lower'] = bollinger.bollinger_lband()
-    
-    # مؤشرات الحجم
-    data['Volume_MA'] = data['Volume'].rolling(20).mean()
-    data['Volume_Ratio'] = data['Volume'] / data['Volume_MA']
-    
-    # التقلب
-    data['Volatility'] = data['Close'].pct_change().rolling(20).std()
-    
-    # أنماط السعر
-    data['Price_Range'] = data['High'] - data['Low']
-    data['Price_Change'] = data['Close'] - data['Open']
-    data['Gap'] = data['Open'] - data['Close'].shift(1)
-    
-    return data
+# ===== تجهيز البيانات للنموذج =====
+def prepare_features(df, with_target=True):
+    if df.empty:
+        return None, None
+    df = df.copy()
+    if with_target:
+        df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
+        df = df.iloc[:-1]
+        X = df[FEATURE_COLS]
+        y = df["Target"].astype(int)
+        return X, y
+    else:
+        X = df[FEATURE_COLS]
+        return X, None
 
-def prepare_advanced_features(data, with_target=True):
-    """تحضير الميزات المتقدمة"""
-    if data.empty or len(data) < 50:
-        return None, None, None
-    
-    try:
-        data = calculate_advanced_indicators(data)
-        
-        features = [
-            'Open', 'High', 'Low', 'Close', 'Volume',
-            'MA_5', 'MA_20', 'MA_50',
-            'RSI', 'MACD', 'MACD_Signal',
-            'BB_Upper', 'BB_Lower', 'Volume_Ratio', 'Volatility',
-            'Price_Range', 'Price_Change', 'Gap'
-        ]
-        
-        # ملء القيم الناقصة
-        data = data.fillna(method='ffill').fillna(0)
-        
-        if with_target:
-            data["Target"] = (data['Close'].shift(-1) > data['Close']).astype(int)
-            clean_data = data.iloc[:-1].copy()
-            
-            if clean_data.empty:
-                return None, None, None
-                
-            X = clean_data[features]
-            y = clean_data["Target"]
-            return X, y, clean_data
-        else:
-            X = data[features]
-            return X, data, None
-            
-    except Exception as e:
-        st.error(f"⚠ خطأ في تجهيز الميزات: {str(e)}")
-        return None, None, None
+# ===== تدريب النموذج =====
+def train_model(df):
+    X, y = prepare_features(df, with_target=True)
+    if X is None or y is None or len(X) < 30:
+        st.warning("⚠ لا توجد بيانات كافية لتدريب النموذج")
+        return None, None
+    split = int(len(X)*0.8)
+    X_train, X_test = X.iloc[:split], X.iloc[split:]
+    y_train, y_test = y.iloc[:split], y.iloc[split:]
+    model = xgb.XGBClassifier(
+        n_estimators=200,
+        max_depth=5,
+        learning_rate=0.1,
+        tree_method="hist",
+        use_label_encoder=False,
+        eval_metric="logloss",
+        random_state=42
+    )
+    model.fit(X_train, y_train)
+    acc = accuracy_score(y_test, model.predict(X_test))
+    return model, acc
 
-def train_advanced_model(data):
-    """تدريب نموذج متقدم"""
-    X, y, processed_data = prepare_advanced_features(data, with_target=True)
-    
-    if X is None or y is None or len(X) < 100:
-        st.warning("⚠ تحتاج إلى 100 نقطة بيانات على الأقل للتدريب المتقدم")
-        return None, None, None
-    
-    try:
-        # تقسيم البيانات الزمني
-        tscv = TimeSeriesSplit(n_splits=5)
-        scaler = StandardScaler()
-        
-        X_scaled = scaler.fit_transform(X)
-        
-        model = xgb.XGBClassifier(
-            n_estimators=300,
-            max_depth=6,
-            learning_rate=0.05,
-            subsample=0.8,
-            colsample_bytree=0.8,
-            reg_alpha=0.1,
-            tree_method="hist",
-            use_label_encoder=False,
-            eval_metric="logloss",
-            random_state=42
-        )
-        
-        # تدريب مع تحقق متقاطع
-        accuracy_scores = []
-        for train_idx, test_idx in tscv.split(X_scaled):
-            X_train, X_test = X_scaled[train_idx], X_scaled[test_idx]
-            y_train, y_test = y.iloc[train_idx], y.iloc[test_idx]
-            
-            model.fit(X_train, y_train)
-            accuracy_scores.append(accuracy_score(y_test, model.predict(X_test)))
-        
-        avg_accuracy = np.mean(accuracy_scores)
-        
-        # التدريب النهائي على كل البيانات
-        model.fit(X_scaled, y)
-        
-        return model, avg_accuracy, scaler
-        
-    except Exception as e:
-        st.error(f"⚠ خطأ في التدريب: {str(e)}")
-        return None, None, None
-
-def predict_with_confidence(model, scaler, data):
-    """التنبؤ مع حساب درجة الثقة"""
-    X_pred, processed_data, _ = prepare_advanced_features(data, with_target=False)
-    
+# ===== التنبؤ =====
+def predict_last(model, df):
+    X_pred, _ = prepare_features(df, with_target=False)
     if X_pred is None or X_pred.empty:
-        return None, None
-    
-    try:
-        X_scaled = scaler.transform(X_pred)
-        
-        prediction = model.predict(X_scaled[-1:])[0]
-        probabilities = model.predict_proba(X_scaled[-1:])[0]
-        
-        confidence = max(probabilities) * 100
-        
-        return prediction, confidence
-        
-    except Exception as e:
-        st.error(f"⚠ خطأ في التنبؤ: {str(e)}")
-        return None, None
+        return None
+    last_row = X_pred.iloc[[-1]].values
+    pred = model.predict(last_row)[0]
+    prob = model.predict_proba(last_row)[0]
+    return pred, prob
 
-def analyze_image_advanced(file):
-    """تحليل متقدم للصور بدون cv2"""
+# ===== تحليل الصورة بدون cv2 =====
+def analyze_image(file):
     try:
-        image = Image.open(file).convert("RGB")
-        image = image.resize((400, 400))
-        
-        st.image(image, caption="📊 الصورة المحملة", use_column_width=False, width=300)
-        
-        # تحليل الصورة باستخدام PIL فقط
-        # تحويل إلى رمادي
-        gray_image = image.convert('L')
-        
-        # إحصائيات الصورة
-        stat = ImageStat.Stat(gray_image)
-        mean_brightness = stat.mean[0]
-        std_brightness = stat.stddev[0]
-        
-        # تحليل الحواف باستخدام مرشح PIL
-        edges = image.filter(ImageFilter.FIND_EDGES)
-        edge_stat = ImageStat.Stat(edges.convert('L'))
-        edge_intensity = edge_stat.mean[0]
-        
-        # تحليل التباين
-        contrast = image.filter(ImageFilter.CONTOUR)
-        contrast_stat = ImageStat.Stat(contrast.convert('L'))
-        contrast_level = contrast_stat.mean[0]
-        
-        # نظام تسجيل متقدم
-        score = 0
-        if mean_brightness > 130: score += 1
-        if edge_intensity > 30: score += 1
-        if std_brightness > 40: score += 1
-        if contrast_level > 50: score += 1
-        
-        st.write("**📈 تحليل الصورة المتقدم:**")
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("متوسط الإضاءة", f"{mean_brightness:.1f}")
-        with col2:
-            st.metric("شدة الحواف", f"{edge_intensity:.1f}")
-        with col3:
-            st.metric("التباين", f"{std_brightness:.1f}")
-        with col4:
-            st.metric("التفاصيل", f"{contrast_level:.1f}")
-        
-        return 1 if score >= 2 else 0, score
-        
-    except Exception as e:
-        st.error(f"⚠ خطأ في تحليل الصورة: {str(e)}")
-        return None, 0
+        image = Image.open(file).convert("L")  # رمادية
+        image = image.resize((256,256))
+        st.image(image, caption="📷 الصورة المحملة", use_column_width=True)
+        mean_val = np.mean(np.array(image))
+        st.write(f"📊 متوسط الإضاءة في الصورة: {mean_val:.1f}")
+        return 1 if mean_val > 120 else 0
+    except:
+        return None
 
 # ===== واجهة التطبيق =====
-st.title("🎯 AI Smart Trader — النسخة الدقيقة جداً 💎")
-st.warning("⚠ **تحذير:** هذه أداة تعليمية. التداول الفعلي يحمل مخاطر.")
+st.title("📈 AI Smart Trader — الهاتف النهائي 💜")
+st.warning("⚠ التوصيات تعليمية فقط، التداول يحمل مخاطر مالية")
 
-if st.button("🚀 بدء التحليل الدقيق"):
-    with st.spinner("🔬 جاري التحليل المتعمق..."):
-        try:
-            # تحميل البيانات
-            data, used_symbol = load_data(symbol, start_date, end_date)
-            if data.empty:
-                st.stop()
-            
-            st.success(f"✅ تم تحميل {len(data)} يوم تداول لـ {used_symbol}")
-            
-            # عرض إحصائيات
-            st.write("### 📊 الإحصائيات الأساسية:")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                st.metric("متوسط الإغلاق", f"{data['Close'].mean():.2f}")
-            with col2:
-                st.metric("أعلى سعر", f"{data['High'].max():.2f}")
-            with col3:
-                st.metric("أقل سعر", f"{data['Low'].min():.2f}")
-            
-            # مؤشرات فنية حالية
-            st.write("### 📈 المؤشرات الفنية الحالية:")
-            col4, col5, col6 = st.columns(3)
-            
-            with col4:
-                current_rsi = ta.momentum.RSIIndicator(data['Close']).rsi().iloc[-1]
-                st.metric("RSI", f"{current_rsi:.1f}")
-            with col5:
-                current_price = data['Close'].iloc[-1]
-                ma_50 = data['Close'].rolling(50).mean().iloc[-1]
-                trend = "📈 فوق" if current_price > ma_50 else "📉 تحت"
-                st.metric("الاتجاه vs المتوسط 50", trend)
-            with col6:
-                volatility = data['Close'].pct_change().std() * 100
-                st.metric("التقلب", f"{volatility:.2f}%")
-            
-            # تدريب النموذج
-            model, accuracy, scaler = train_advanced_model(data)
-            
-            if model is None:
-                st.error("❌ فشل في تدريب النموذج")
-                st.stop()
-            
-            # التنبؤ
-            prediction, confidence = predict_with_confidence(model, scaler, data)
-            
-            if prediction is not None:
-                st.write("### 🎯 نتائج التحليل الدقيق:")
-                
-                # عرض النتائج
-                result_col1, result_col2 = st.columns(2)
-                
-                with result_col1:
-                    if prediction == 1:
-                        st.success("**الاتجاه: 📈 صاعد**")
-                        st.progress(0.8)
-                    else:
-                        st.error("**الاتجاه: 📉 هابط**")
-                        st.progress(0.2)
-                
-                with result_col2:
-                    if confidence >= confidence_threshold:
-                        st.success(f"**درجة الثقة: {confidence:.1f}%** ✅")
-                    else:
-                        st.warning(f"**درجة الثقة: {confidence:.1f}%** ⚠️")
-                
-                st.info(f"**دقة النموذج: {accuracy*100:.2f}%**")
-                
-                # توصيات
-                st.write("### 💡 التوصيات:")
-                if prediction == 1 and confidence >= confidence_threshold:
-                    st.success("""
-                    **إشارة شراء قوية:**
-                    - اتجاه صاعد مع ثقة عالية
-                    - فرصة جيدة للدخول في صفقة
-                    - ضع وقف الخسارة عند 2-3%
-                    """)
-                elif prediction == 0 and confidence >= confidence_threshold:
-                    st.error("""
-                    **إشارة بيع قوية:**
-                    - اتجاه هابط مع ثقة عالية
-                    - تجنب الشراء حالياً
-                    - فرصة للدخول في صفقات بيع
-                    """)
-                else:
-                    st.warning("""
-                    **إشارة محايدة:**
-                    - الثقة غير كافية
-                    - الانتظار أفضل خيار
-                    - ابحث عن تأكيدات إضافية
-                    """)
-            
-            # تحليل الصورة
-            if uploaded_file is not None:
-                st.write("### 📷 تحليل الصورة المتقدم:")
-                image_pred, image_score = analyze_image_advanced(uploaded_file)
-                
-                if image_pred == 1:
-                    st.success(f"**نتيجة الصورة: 📈 إيجابية (درجة: {image_score}/4)**")
-                elif image_pred == 0:
-                    st.error(f"**نتيجة الصورة: 📉 سلبية (درجة: {image_score}/4)**")
-            
-            # عرض البيانات
-            with st.expander("📋 عرض البيانات الكاملة"):
-                st.dataframe(data.tail(10))
-                
-                # رسم بياني
-                st.write("**آخر 100 يوم تداول:**")
-                st.line_chart(data['Close'].tail(100))
-
-        except Exception as e:
-            st.error(f"❌ حدث خطأ غير متوقع: {str(e)}")
+if st.button("📊 الحصول على التوصيات"):
+    with st.spinner("⏳ جاري تحميل البيانات وتحليلها..."):
+        df, used_symbol = load_data(symbol, start_date, end_date)
+        if df.empty or len(df) < 10:
+            st.error("⚠ لا توجد بيانات كافية لهذا الرمز أو البدائل")
             st.stop()
 
-st.markdown("---")
-st.write("### 📝 ملاحظات مهمة:")
-st.info("""
-- استخدم بيانات تاريخية طويلة (سنتين على الأقل)
-- درجة الثقة مهمة لقوة الإشارة
-- لا تعتمد على إشارة واحدة فقط
-- هذه أداة تعليمية واستشارية
-- استشر متخصصاً قبل التداول الفعلي
-""")
+        st.success(f"📊 تم تحميل {len(df)} يوم تداول للرمز {used_symbol}")
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("متوسط الإغلاق", f"{float(df['Close'].mean()):.2f}")
+        with col2:
+            st.metric("أعلى سعر", f"{float(df['High'].max()):.2f}")
+        with col3:
+            st.metric("أقل سعر", f"{float(df['Low'].min()):.2f}")
 
-# ملف requirements.txt المطلوب
-st.sidebar.markdown("---")
-st.sidebar.info("""
-**المكتبات المطلوبة:**
+        # تدريب النموذج
+        model, acc = train_model(df)
+        if model is None:
+            st.error("⚠ لم يتمكن النموذج من التدريب")
+            st.stop()
+
+        # التنبؤ
+        pred, prob = predict_last(model, df)
+        if pred is not None:
+            confidence = prob[pred]*100
+            if pred == 1:
+                signal = "شراء قوي" if confidence > 65 else "شراء ضعيف"
+                st.success(f"🎯 التنبؤ: {used_symbol} صاعد — {signal} — ثقة {confidence:.2f}%")
+            else:
+                signal = "بيع قوي" if confidence > 65 else "بيع ضعيف"
+                st.warning(f"📉 التنبؤ: {used_symbol} هابط — {signal} — ثقة {confidence:.2f}%")
+
+        # عرض الرسوم البيانية للمؤشرات
+        st.markdown("### 📊 الرسوم البيانية للمؤشرات الفنية")
+        st.line_chart(df[["Close","MA20","MA50"]])
+        st.line_chart(df[["RSI"]])
+        st.line_chart(df[["MACD","MACD_Signal"]])
+        st.line_chart(df[["BB_Upper","BB_Lower","Close"]])
+
+        # تحليل الصورة إذا تم رفعها
+        if uploaded_file is not None:
+            st.markdown("### 📷 تحليل الصورة")
+            img_pred = analyze_image(uploaded_file)
+            if img_pred == 1:
+                st.success("🔥 تحليل الصورة: السوق يبدو صاعداً")
+            elif img_pred == 0:
+                st.warning("📉 تحليل الصورة: السوق يبدو هابطاً")
+            else:
+                st.info("⚠ لم يتمكن التطبيق من تحليل الصورة")
+
+st.markdown("---")
+st.subheader("⭐ رموز مقترحة للمراقبة")
+recommended_symbols = random.sample(all_symbols, min(3, len(all_symbols)))
+st.write(recommended_symbols)
+
+st.markdown("---")
+st.info("""
+### 📝 ملاحظات مهمة:
+- هذا التطبيق لأغراض تعليمية فقط
+- يعمل بالكامل على الهاتف
+- جميع المؤشرات الفنية متاحة والتنبيهات الذكية تعمل
+- استشر خبراء ماليين قبل اتخاذ أي قرارات تداول حقيقية
+""")
