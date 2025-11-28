@@ -21,8 +21,7 @@ all_symbols = stock_symbols + forex_symbols
 # الأعمدة المستخدمة
 FEATURE_COLS = [
     "Open", "High", "Low", "Close", "Volume",
-    "Price_Range", "Price_Change", "MA_5", "Volume_MA",
-    "RSI", "MACD", "MA20", "BB_upper", "BB_lower"
+    "Price_Range", "Price_Change", "MA_5", "Volume_MA"
 ]
 
 # ===== الشريط الجانبي =====
@@ -53,108 +52,65 @@ def load_data(symbol, start, end):
         st.error(f"خطأ في تحميل البيانات: {e}")
         return pd.DataFrame(), symbol
 
-# إضافة مؤشرات فنية
-def add_technical_indicators(df):
-    try:
-        # RSI
-        delta = df['Close'].diff()
-        gain = delta.clip(lower=0)
-        loss = (-delta).clip(lower=0)
-        avg_gain = gain.rolling(14, min_periods=1).mean()
-        avg_loss = loss.rolling(14, min_periods=1).mean()
-        rs = avg_gain / avg_loss.replace(0, 0.0001)
-        df['RSI'] = 100 - (100/(1+rs))
-        # MACD
-        exp1 = df['Close'].ewm(span=12, min_periods=1).mean()
-        exp2 = df['Close'].ewm(span=26, min_periods=1).mean()
-        df['MACD'] = exp1 - exp2
-        # Bollinger Bands
-        df['MA20'] = df['Close'].rolling(20, min_periods=1).mean()
-        df['BB_std'] = df['Close'].rolling(20, min_periods=1).std()
-        df['BB_upper'] = df['MA20'] + (df['BB_std']*2)
-        df['BB_lower'] = df['MA20'] - (df['BB_std']*2)
-        return df
-    except Exception as e:
-        st.error(f"خطأ في المؤشرات الفنية: {e}")
-        # إضافة أعمدة فارغة في حالة الخطأ
-        for col in ['RSI', 'MACD', 'MA20', 'BB_std', 'BB_upper', 'BB_lower']:
-            df[col] = 0.0
-        return df
-
-# تجهيز الميزات - الإصلاح هنا
+# تجهيز الميزات - الإصلاح الكامل
 def prepare_features(df, with_target=True):
     if df.empty: 
         return None, None, None
     
     df = df.copy()
-    required_cols = ["Open","High","Low","Close","Volume"]
     
     # التحقق من الأعمدة الأساسية
+    required_cols = ["Open","High","Low","Close","Volume"]
     if not all(col in df.columns for col in required_cols):
-        st.warning("⚠ الأعمدة الأساسية غير موجودة في البيانات")
         return None, None, None
     
     try:
-        # حساب الميزات الأساسية
+        # حساب الميزات الأساسية فقط
         df["Price_Range"] = df["High"] - df["Low"]
         df["Price_Change"] = df["Close"] - df["Open"]
         df["MA_5"] = df["Close"].rolling(5, min_periods=1).mean()
         df["Volume_MA"] = df["Volume"].rolling(5, min_periods=1).mean()
         
-        # إضافة المؤشرات الفنية
-        df = add_technical_indicators(df)
-        
-        # التأكد من وجود جميع الأعمدة المطلوبة
+        # ملء القيم الناقصة
         for col in FEATURE_COLS:
             if col not in df.columns:
                 df[col] = 0.0
         
-        # ملء القيم الناقصة
         df[FEATURE_COLS] = df[FEATURE_COLS].fillna(0)
         
         if with_target:
-            # إنشاء الهدف مع معالجة الأخطاء
-            if len(df) > 1:
-                df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
-                
-                # التحقق من وجود عمود Target قبل حذف الصفوف
-                if "Target" not in df.columns:
-                    st.warning("⚠ لم يتم إنشاء عمود الهدف")
-                    return None, None, None
-                
-                # حفظ عدد الصفوف قبل الحذف
-                before_drop = len(df)
-                df = df.dropna(subset=["Target"])
-                after_drop = len(df)
-                
-                if df.empty:
-                    st.warning("⚠ لا توجد بيانات صالحة بعد إنشاء الهدف")
-                    return None, None, None
-                    
-                if after_drop < 10:
-                    st.warning(f"⚠ بيانات غير كافية بعد المعالجة: {after_drop} صف فقط")
-                    return None, None, None
-                
-                X = df[FEATURE_COLS]
-                y = df["Target"].astype(int)
-                return X, y, df
-            else:
-                st.warning("⚠ بيانات غير كافية لإنشاء الهدف")
+            # إنشاء الهدف بشكل آمن
+            df["Target"] = (df["Close"].shift(-1) > df["Close"]).astype(int)
+            
+            # حذف الصف الأخير فقط (الذي يحتوي على NaN في Target)
+            df_with_target = df.iloc[:-1].copy()
+            
+            if df_with_target.empty:
                 return None, None, None
+                
+            X = df_with_target[FEATURE_COLS]
+            y = df_with_target["Target"].astype(int)
+            return X, y, df_with_target
         else:
+            # للتنبؤ، نستخدم كل البيانات بما في ذلك الصف الأخير
             X = df[FEATURE_COLS]
             return X, df, None
             
     except Exception as e:
-        st.error(f"⚠ خطأ في تجهيز الميزات: {e}")
+        st.error(f"⚠ خطأ في تجهيز الميزات: {str(e)}")
         return None, None, None
 
 # تدريب النموذج
 def train_model(df):
     try:
-        X, y, _ = prepare_features(df, with_target=True)
-        if X is None or y is None or len(X) < 30:
-            st.warning("⚠ البيانات غير كافية لتدريب النموذج (30 نقطة على الأقل)")
+        X, y, df_processed = prepare_features(df, with_target=True)
+        
+        if X is None or y is None:
+            st.warning("⚠ لا توجد بيانات كافية لتدريب النموذج")
+            return None, None
+            
+        if len(X) < 30:
+            st.warning(f"⚠ البيانات غير كافية لتدريب النموذج ({len(X)} نقطة فقط، تحتاج 30 على الأقل)")
             return None, None
         
         split = int(len(X) * 0.8)
@@ -165,8 +121,7 @@ def train_model(df):
         X_train, X_test = X.iloc[:split], X.iloc[split:]
         y_train, y_test = y.iloc[:split], y.iloc[split:]
         
-        # التأكد من أن بيانات الاختبار ليست فارغة
-        if len(X_test) == 0 or len(y_test) == 0:
+        if len(X_test) == 0:
             st.warning("⚠ بيانات الاختبار فارغة")
             return None, None
             
@@ -184,24 +139,22 @@ def train_model(df):
         return model, acc
         
     except Exception as e:
-        st.error(f"⚠ خطأ في تدريب النموذج: {e}")
+        st.error(f"⚠ خطأ في تدريب النموذج: {str(e)}")
         return None, None
 
 # التنبؤ
 def predict_last(model, df):
     try:
-        X_pred, _, _ = prepare_features(df, with_target=False)
+        X_pred, df_processed, _ = prepare_features(df, with_target=False)
         if X_pred is None or X_pred.empty: 
             return None
         
-        if len(X_pred) == 0:
-            return None
-            
         last_row = X_pred.iloc[[-1]].values
-        return model.predict(last_row)[0]
+        prediction = model.predict(last_row)[0]
+        return prediction
         
     except Exception as e:
-        st.error(f"⚠ خطأ أثناء التنبؤ: {e}")
+        st.error(f"⚠ خطأ أثناء التنبؤ: {str(e)}")
         return None
 
 # تحليل الصور
@@ -216,7 +169,7 @@ def analyze_image(file):
         st.write(f"📊 متوسط الإضاءة في الصورة: {mean_val:.1f}")
         return 1 if mean_val > 120 else 0
     except Exception as e:
-        st.error(f"⚠ خطأ في تحليل الصورة: {e}")
+        st.error(f"⚠ خطأ في تحليل الصورة: {str(e)}")
         return None
 
 # ===== واجهة التطبيق =====
@@ -226,35 +179,48 @@ st.warning("⚠ التوصيات تعليمية فقط، التداول يحمل
 if st.button("📊 الحصول على التوصيات"):
     with st.spinner("⏳ جاري تحميل البيانات وتحليلها..."):
         try:
+            # تحميل البيانات
             df, used_symbol = load_data(symbol, start_date, end_date)
             if df.empty or len(df) < 10:
                 st.error("⚠ لا توجد بيانات كافية لهذا الرمز أو البدائل")
                 st.stop()
             
-            st.info(f"📊 تم تحميل {len(df)} يوم تداول للرمز {used_symbol}")
+            st.success(f"📊 تم تحميل {len(df)} يوم تداول للرمز {used_symbol}")
             
-            # عرض عينة من البيانات للتأكد
-            st.write("### معاينة البيانات:")
-            st.dataframe(df.head(3))
+            # عرض معلومات أساسية عن البيانات
+            st.write("### 📈 معلومات أساسية عن البيانات:")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("متوسط الإغلاق", f"{df['Close'].mean():.2f}")
+            with col2:
+                st.metric("أعلى سعر", f"{df['High'].max():.2f}")
+            with col3:
+                st.metric("أقل سعر", f"{df['Low'].min():.2f}")
             
+            # تدريب النموذج
             model, acc = train_model(df)
             if model is None:
                 st.error("⚠ لم يتمكن النموذج من التدريب بسبب مشاكل في البيانات")
                 st.stop()
             
+            # التنبؤ
             pred = predict_last(model, df)
             if pred is None:
                 st.error("⚠ لا يمكن التنبؤ بالاتجاه حالياً")
             else:
                 st.success(f"✔ دقة النموذج: {acc*100:.2f}%")
                 if pred == 1:
-                    st.success(f"🔥 التنبؤ: {used_symbol} صاعد (إشارة شراء تعليمية)")
+                    st.success(f"🎯 التنبؤ: {used_symbol} صاعد (اتجاه إيجابي)")
+                    st.info("💡 الإشارة: قد تكون فرصة للشراء (تعليمي)")
                 else:
-                    st.warning(f"📉 التنبؤ: {used_symbol} هابط (تجنب الشراء)")
+                    st.warning(f"📉 التنبؤ: {used_symbol} هابط (اتجاه سلبي)")
+                    st.info("💡 الإشارة: قد تكون فرصة للبيع أو الانتظار (تعليمي)")
             
-            st.markdown("### آخر البيانات التاريخية:")
+            # عرض البيانات
+            st.markdown("### 📊 آخر البيانات التاريخية:")
             st.dataframe(df.tail(10))
             
+            # تحليل الصورة إذا تم رفعها
             if uploaded_file is not None:
                 st.markdown("### 📷 تحليل الصورة")
                 img_pred = analyze_image(uploaded_file)
@@ -266,9 +232,18 @@ if st.button("📊 الحصول على التوصيات"):
                     st.info("⚠ لم يتمكن التطبيق من تحليل الصورة")
                     
         except Exception as e:
-            st.error(f"⚠ حدث خطأ غير متوقع: {e}")
+            st.error(f"⚠ حدث خطأ غير متوقع: {str(e)}")
             st.stop()
 
 st.markdown("---")
-st.subheader("⭐ رموز مقترحة للمراقبة (تعليمي)")
-st.write(random.sample(all_symbols, 5))
+st.subheader("⭐ رموز مقترحة للمراقبة")
+recommended_symbols = random.sample(all_symbols, min(3, len(all_symbols)))
+st.write(recommended_symbols)
+
+st.markdown("---")
+st.info("""
+### 📝 ملاحظات مهمة:
+- هذا التطبيق لأغراض تعليمية فقط
+- الدقة التنبؤية قد تختلف حسب ظروف السوق
+- استشر خبراء ماليين قبل اتخاذ أي قرارات تداول حقيقية
+""")
