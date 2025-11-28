@@ -1,102 +1,49 @@
-# AI Smart Trader Pro — النسخة الكاملة النهائية
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
-from datetime import datetime
+from ta.trend import SMAIndicator, MACD
 
-st.set_page_config(page_title="AI Smart Trader Pro", layout="wide")
-st.title("🎯 AI Smart Trader Pro — النسخة الكاملة النهائية")
+# --- واجهة التطبيق الأصلية ---
+st.title("🎯 AI Smart Trader Pro — النسخة النهائية")
+st.subheader("تحليل الأسهم باستخدام الذكاء الاصطناعي")
 
-# ⚙️ الإعدادات المتقدمة
-symbol = st.text_input("اختر الأصل:", value="AAPL")
-start_date = st.date_input("تاريخ البداية:", value=pd.to_datetime("2023-01-01"))
-end_date = st.date_input("تاريخ النهاية:", value=pd.to_datetime(datetime.today()))
-lookback = st.slider("أيام النظر للخلف:", 5, 40, 20)
-confidence = st.slider("حد الثقة لإشارة قوية (%):", 50, 95, 70)
+# --- إدخالات المستخدم ---
+symbol = st.selectbox("اختر الأصل:", ["AAPL", "TSLA", "GOOGL", "MSFT"])
+start_date = st.date_input("تاريخ البداية")
+end_date = st.date_input("تاريخ النهاية")
+lookback = st.slider("أيام النظر للخلف:", min_value=5, max_value=40, value=20)
+confidence = st.slider("حد الثقة لإشارة قوية (%):", min_value=50, max_value=95, value=70)
 
-# تحميل البيانات
-@st.cache_data
-def load_data(symbol, start_date, end_date):
-    df = yf.download(symbol, start=start_date, end=end_date)
-    df = df.dropna()
-    return df
+# --- جلب البيانات ---
+df = yf.download(symbol, start=start_date, end=end_date)
+df.reset_index(inplace=True)
 
-df = load_data(symbol, start_date, end_date)
-close = df["Close"]
-open_ = df["Open"]
-high = df["High"]
-low = df["Low"]
-volume = df["Volume"]
+# --- التأكد من عدم وجود قيم مفقودة ---
+df.fillna(method='ffill', inplace=True)
 
-# --- المؤشرات الفنية ---
-# المتوسطات المتحركة
-df["SMA_5"] = close.rolling(window=5).mean()
-df["SMA_20"] = close.rolling(window=20).mean()
-df["SMA_50"] = close.rolling(window=50).mean()
+# --- حساب المتوسطات المتحركة ---
+df["SMA_5"] = SMAIndicator(df["Close"], window=5).sma_indicator()
+df["SMA_20"] = SMAIndicator(df["Close"], window=20).sma_indicator()
+df["SMA_50"] = SMAIndicator(df["Close"], window=50).sma_indicator()
 
-df["EMA_12"] = close.ewm(span=12, adjust=False).mean()
-df["EMA_26"] = close.ewm(span=26, adjust=False).mean()
+# --- حساب MACD ---
+macd_indicator = MACD(df["Close"])
+df["MACD"] = macd_indicator.macd()
 
-# MACD
-df["MACD"] = df["EMA_12"] - df["EMA_26"]
-df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
-df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
+# --- حساب نسبة الحجم ---
+df["Volume_SMA"] = df["Volume"].rolling(window=20).mean().replace(0, np.nan)
+df["Volume_Ratio"] = df["Volume"] / df["Volume_SMA"]
 
-# RSI
-delta = close.diff()
-gain = delta.clip(lower=0)
-loss = -1*delta.clip(upper=0)
-avg_gain = gain.rolling(14).mean()
-avg_loss = loss.rolling(14).mean()
-rs = avg_gain / avg_loss
-df["RSI"] = 100 - (100 / (1 + rs))
-
-# Bollinger Bands
-df["BB_Mid"] = close.rolling(window=20).mean()
-df["BB_Std"] = close.rolling(window=20).std()
-df["BB_Upper"] = df["BB_Mid"] + 2*df["BB_Std"]
-df["BB_Lower"] = df["BB_Mid"] - 2*df["BB_Std"]
-
-# Volume Ratio
-df["Volume_SMA"] = volume.rolling(window=20).mean().replace(0, np.nan)
-df["Volume_Ratio"] = volume / df["Volume_SMA"]
-
-# Gap
-df["Gap"] = (open_ - close.shift(1)) / close.shift(1)
-
-# --- الرسوم البيانية ---
+# --- عرض النتائج ---
 st.subheader("📈 السعر + المتوسطات المتحركة")
 st.line_chart(df[["Close", "SMA_20", "SMA_50"]].tail(150))
 
-st.subheader("MACD")
-st.line_chart(df[["MACD", "MACD_Signal"]].tail(150))
-
-st.subheader("RSI")
-st.line_chart(df["RSI"].tail(150))
-
-st.subheader("Bollinger Bands")
-st.line_chart(df[["Close", "BB_Upper", "BB_Lower"]].tail(150))
-
-st.subheader("Volume Ratio")
-st.line_chart(df["Volume_Ratio"].tail(150))
-
-# --- إشارات تداول ذكية ---
-st.subheader("🎯 إشارة التداول الحالية")
-latest_macd = df["MACD"].iloc[-1]
-latest_signal = df["MACD_Signal"].iloc[-1]
-latest_rsi = df["RSI"].iloc[-1]
-latest_price = close.iloc[-1]
-upper_bb = df["BB_Upper"].iloc[-1]
-lower_bb = df["BB_Lower"].iloc[-1]
-
-signal = ""
-if latest_macd > latest_signal and latest_rsi < 70 and latest_price < upper_bb:
-    signal = "شراء ↑"
-elif latest_macd < latest_signal and latest_rsi > 30 and latest_price > lower_bb:
-    signal = "بيع ↓"
+st.subheader("💹 إشارات التداول")
+if df["MACD"].iloc[-1] > 0 and df["Close"].iloc[-1] > df["SMA_20"].iloc[-1]:
+    st.success("إشارة شراء قوية ✅")
 else:
-    signal = "تثبيت ⚖️"
+    st.warning("إشارة للبيع ⚠️")
 
-st.info(f"الإشارة الحالية: {signal}")
-st.info("💡 هذا التطبيق تعليمي + عملي، يمكن استخدامه للتداول الفعلي (احذر المخاطر).")
+st.subheader("🔢 بيانات الحجم")
+st.line_chart(df[["Volume", "Volume_SMA", "Volume_Ratio"]].tail(150))
