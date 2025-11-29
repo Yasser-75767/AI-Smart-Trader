@@ -36,11 +36,9 @@ if not st.session_state["logged_in"]:
     st.write("### Login with GitHub")
     st.write(f"[Login with GitHub]({authorization_url})")
     
-    # زر لتأكيد تسجيل الدخول بعد عملية OAuth
     if st.button("I have logged in"):
-        # هنا يمكنك إضافة تحقق من الرمز إذا أردت
+        # تحديث حالة تسجيل الدخول
         st.session_state["logged_in"] = True
-        st.experimental_rerun()  # إعادة تشغيل لتحديث الواجهة
 
 # -------------------------
 #       Dashboard بعد تسجيل الدخول
