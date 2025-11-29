@@ -7,32 +7,47 @@ import plotly.graph_objects as go
 #       إعداد الصفحة
 # -------------------------
 st.set_page_config(page_title="AI Smart Trader", layout="wide")
-st.title("🎯 AI Smart Trader Pro — النسخة المستقرة مع إشارات التداول")
+st.title("AI Smart Trader")  # فقط الاسم بدون أي كلمات إضافية
 
 # -------------------------
 #       اختيار السوق والرمز
 # -------------------------
-market_type = st.selectbox("اختر نوع السوق", ["أسهم", "فوركس"])
+market_type = st.selectbox("Select Market", ["Stocks", "Forex"])
 
-# خيارات الأسهم المشهورة
-stocks_list = ["AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "META", "NFLX"]
-# خيارات الفوركس المشهورة
-forex_list = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]
+# قائمة كبيرة من الأسهم المشهورة (أكثر من 50)
+stocks_list = [
+    "AAPL","TSLA","GOOGL","AMZN","MSFT","META","NFLX","NVDA","JPM","BAC",
+    "V","MA","DIS","ADBE","PYPL","INTC","CSCO","KO","PEP","NKE",
+    "ORCL","CRM","WMT","T","VZ","BA","IBM","QCOM","MCD","SBUX",
+    "GE","GM","F","AMD","SHOP","UBER","LYFT","SQ","TWTR","SNAP",
+    "BIDU","JD","PDD","BABA","TCEHY","NIO","LI","XPEV","BYND","PLUG",
+    "SPCE","RBLX","ZM","DOCU","ETSY","ROKU","ABNB","NET","OKTA","TEAM"
+]
 
-if market_type == "أسهم":
-    symbol = st.selectbox("اختر السهم", stocks_list)
+# قائمة كبيرة من أزواج الفوركس
+forex_list = [
+    "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
+    "EURGBP","EURJPY","EURCHF","GBPJPY","AUDJPY","AUDNZD","CADJPY",
+    "CHFJPY","GBPCHF","EURAUD","EURCAD","EURSEK","EURTRY",
+    "GBPTRY","USDSGD","USDHKD","USDNOK","USDSEK","USDDKK","USDZAR",
+    "USDTHB","USDINR"
+]
+
+# اختيار الرمز مع البحث
+if market_type == "Stocks":
+    symbol = st.selectbox("Select Stock", stocks_list, index=0)
 else:
-    symbol = st.selectbox("اختر زوج الفوركس", forex_list) + "=X"  # صيغة ياهو فوركس
+    symbol = st.selectbox("Select Forex Pair", forex_list, index=0) + "=X"
 
 col1, col2 = st.columns(2)
 with col1:
-    start_date = st.date_input("تاريخ البداية")
+    start_date = st.date_input("Start Date")
 with col2:
-    end_date = st.date_input("تاريخ النهاية")
+    end_date = st.date_input("End Date")
 
-chart_type = st.selectbox("اختر نوع الرسم", ["📉 الشموع اليابانية", "📈 الرسم الخطي"])
+chart_type = st.selectbox("Chart Type", ["Candlestick", "Line"])
 
-run = st.button("🔍 جلب البيانات وتحليلها")
+run = st.button("Fetch Data & Analyze")
 
 # -------------------------
 #       تحميل البيانات
@@ -41,7 +56,7 @@ if run:
     df = yf.download(symbol, start=start_date, end=end_date)
 
     if df.empty:
-        st.error("❌ لم يتم العثور على بيانات!")
+        st.error("No data found for this symbol!")
         st.stop()
 
     # -------------------------
@@ -70,12 +85,11 @@ if run:
     # -------------------------
     #       الرسم البياني
     # -------------------------
-    st.subheader("📊 الرسم البياني مع الإشارات")
+    st.subheader("Chart with Buy/Sell Signals")
 
     fig = go.Figure()
 
-    # الرسم حسب اختيار المستخدم
-    if chart_type == "📉 الشموع اليابانية":
+    if chart_type == "Candlestick":
         fig.add_trace(go.Candlestick(
             x=df.index,
             open=df["Open"],
@@ -124,5 +138,5 @@ if run:
     # -------------------------
     #       جدول البيانات
     # -------------------------
-    st.subheader("📋 جدول البيانات والمؤشرات")
+    st.subheader("Data & Indicators")
     st.dataframe(df.tail(200), height=600)
