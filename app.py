@@ -23,19 +23,32 @@ authorization_url, state = oauth.create_authorization_url(
 )
 
 # -------------------------
-#       تسجيل الدخول
+#   Session state للتحقق من تسجيل الدخول
 # -------------------------
-st.title("AI Smart Trader")
-st.write("### Login with GitHub")
-st.write(f"[Login with GitHub]({authorization_url})")
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
 
 # -------------------------
-#   بعد تسجيل الدخول (زر متابعة)
+#       صفحة تسجيل الدخول
 # -------------------------
-if st.button("Continue to Dashboard"):
-    # -------------------------
-    #       Sidebar
-    # -------------------------
+if not st.session_state["logged_in"]:
+    st.title("AI Smart Trader")
+    st.write("### Login with GitHub")
+    st.write(f"[Login with GitHub]({authorization_url})")
+    
+    # زر لتأكيد تسجيل الدخول بعد عملية OAuth
+    if st.button("I have logged in"):
+        # هنا يمكنك إضافة تحقق من الرمز إذا أردت
+        st.session_state["logged_in"] = True
+        st.experimental_rerun()  # إعادة تشغيل لتحديث الواجهة
+
+# -------------------------
+#       Dashboard بعد تسجيل الدخول
+# -------------------------
+if st.session_state["logged_in"]:
+    st.title("AI Smart Trader Dashboard")
+
+    # Sidebar
     st.sidebar.title("Settings")
     market_type = st.sidebar.selectbox("Select Market", ["Stocks", "Forex"])
 
@@ -59,7 +72,7 @@ if st.button("Continue to Dashboard"):
             st.stop()
 
         # -------------------------
-        #   المؤشرات
+        #       المؤشرات
         # -------------------------
         df["SMA20"] = df["Close"].rolling(20).mean()
         df["SMA50"] = df["Close"].rolling(50).mean()
