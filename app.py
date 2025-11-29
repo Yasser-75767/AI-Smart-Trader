@@ -10,11 +10,21 @@ st.set_page_config(page_title="AI Smart Trader", layout="wide")
 st.title("🎯 AI Smart Trader Pro — النسخة المستقرة مع إشارات التداول")
 
 # -------------------------
-#       واجهة المستخدم
+#       اختيار السوق والرمز
 # -------------------------
-symbol = st.text_input("اختر الأصل (رمز السهم)", "AAPL")
-col1, col2 = st.columns(2)
+market_type = st.selectbox("اختر نوع السوق", ["أسهم", "فوركس"])
 
+# خيارات الأسهم المشهورة
+stocks_list = ["AAPL", "TSLA", "GOOGL", "AMZN", "MSFT", "META", "NFLX"]
+# خيارات الفوركس المشهورة
+forex_list = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]
+
+if market_type == "أسهم":
+    symbol = st.selectbox("اختر السهم", stocks_list)
+else:
+    symbol = st.selectbox("اختر زوج الفوركس", forex_list) + "=X"  # صيغة ياهو فوركس
+
+col1, col2 = st.columns(2)
 with col1:
     start_date = st.date_input("تاريخ البداية")
 with col2:
@@ -31,7 +41,7 @@ if run:
     df = yf.download(symbol, start=start_date, end=end_date)
 
     if df.empty:
-        st.error("❌ لم يتم العثور على بيانات للسهم!")
+        st.error("❌ لم يتم العثور على بيانات!")
         st.stop()
 
     # -------------------------
@@ -64,6 +74,7 @@ if run:
 
     fig = go.Figure()
 
+    # الرسم حسب اختيار المستخدم
     if chart_type == "📉 الشموع اليابانية":
         fig.add_trace(go.Candlestick(
             x=df.index,
@@ -75,8 +86,10 @@ if run:
         ))
     else:
         fig.add_trace(go.Scatter(
-            x=df.index, y=df["Close"],
-            mode="lines", name="Close"
+            x=df.index,
+            y=df["Close"],
+            mode="lines",
+            name="Close"
         ))
 
     # SMA
@@ -87,7 +100,10 @@ if run:
     buys = df[df["Buy"]]
     fig.add_trace(go.Scatter(
         x=buys.index, y=buys["Close"],
-        mode="markers", name="BUY",
+        mode="markers+text",
+        name="BUY",
+        text=["BUY"]*len(buys),
+        textposition="top center",
         marker=dict(color="green", size=12, symbol="triangle-up")
     ))
 
@@ -95,7 +111,10 @@ if run:
     sells = df[df["Sell"]]
     fig.add_trace(go.Scatter(
         x=sells.index, y=sells["Close"],
-        mode="markers", name="SELL",
+        mode="markers+text",
+        name="SELL",
+        text=["SELL"]*len(sells),
+        textposition="bottom center",
         marker=dict(color="red", size=12, symbol="triangle-down")
     ))
 
