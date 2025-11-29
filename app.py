@@ -3,66 +3,44 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 from authlib.integrations.requests_client import OAuth2Session
-import os
-from dotenv import load_dotenv
 
 # -------------------------
-#       تحميل إعدادات OAuth
+#       GitHub OAuth
 # -------------------------
-load_dotenv()
-CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-REDIRECT_URI = os.getenv("REDIRECT_URI")  # مثال: https://yourapp.streamlit.app
+CLIENT_ID = st.secrets["GITHUB_CLIENT_ID"]
+CLIENT_SECRET = st.secrets["GITHUB_CLIENT_SECRET"]
+REDIRECT_URI = st.secrets["REDIRECT_URI"]
 
-# -------------------------
-#       إعداد OAuth
-# -------------------------
 oauth = OAuth2Session(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
-    scope="openid email profile",
-    redirect_uri=REDIRECT_URI,
+    scope="read:user",
+    redirect_uri=REDIRECT_URI
 )
 
 authorization_url, state = oauth.create_authorization_url(
-    "https://accounts.google.com/o/oauth2/auth"
+    "https://github.com/login/oauth/authorize"
 )
 
 # -------------------------
 #       تسجيل الدخول
 # -------------------------
 st.title("AI Smart Trader")
+st.write("### Login with GitHub")
+st.write(f"[Login with GitHub]({authorization_url})")
 
-st.write("### Login with Google")
-st.write(f"[Click here to login]({authorization_url})")
-
-# بعد تسجيل الدخول يمكن إضافة استلام الـ token وبيانات المستخدم
-# هنا ستضع باقي تطبيقك بعد تسجيل الدخول
-
-if st.button("Continue to Dashboard (mock)"):
+# -------------------------
+#   بعد تسجيل الدخول (زر متابعة)
+# -------------------------
+if st.button("Continue to Dashboard"):
     # -------------------------
-    #       واجهة Sidebar
+    #       Sidebar
     # -------------------------
     st.sidebar.title("Settings")
-
     market_type = st.sidebar.selectbox("Select Market", ["Stocks", "Forex"])
 
-    stocks_list = [
-        "AAPL","TSLA","GOOGL","AMZN","MSFT","META","NFLX","NVDA","JPM","BAC",
-        "V","MA","DIS","ADBE","PYPL","INTC","CSCO","KO","PEP","NKE",
-        "ORCL","CRM","WMT","T","VZ","BA","IBM","QCOM","MCD","SBUX",
-        "GE","GM","F","AMD","SHOP","UBER","LYFT","SQ","TWTR","SNAP",
-        "BIDU","JD","PDD","BABA","TCEHY","NIO","LI","XPEV","BYND","PLUG",
-        "SPCE","RBLX","ZM","DOCU","ETSY","ROKU","ABNB","NET","OKTA","TEAM"
-    ]
-
-    forex_list = [
-        "EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD","NZDUSD",
-        "EURGBP","EURJPY","EURCHF","GBPJPY","AUDJPY","AUDNZD","CADJPY",
-        "CHFJPY","GBPCHF","EURAUD","EURCAD","EURSEK","EURTRY",
-        "GBPTRY","USDSGD","USDHKD","USDNOK","USDSEK","USDDKK","USDZAR",
-        "USDTHB","USDINR"
-    ]
+    stocks_list = ["AAPL","TSLA","GOOGL","AMZN","MSFT","META","NVDA","NFLX"]
+    forex_list = ["EURUSD","GBPUSD","USDJPY","USDCHF","AUDUSD","USDCAD"]
 
     if market_type == "Stocks":
         symbol = st.sidebar.selectbox("Select Stock", stocks_list)
@@ -76,28 +54,24 @@ if st.button("Continue to Dashboard (mock)"):
 
     if run:
         df = yf.download(symbol, start=start_date, end=end_date)
-
         if df.empty:
             st.error("No data found for this symbol!")
             st.stop()
 
         # -------------------------
-        #       حساب المؤشرات
+        #   المؤشرات
         # -------------------------
-        df["SMA20"] = df["Close"].rolling(window=20).mean()
-        df["SMA50"] = df["Close"].rolling(window=50).mean()
-
+        df["SMA20"] = df["Close"].rolling(20).mean()
+        df["SMA50"] = df["Close"].rolling(50).mean()
         delta = df["Close"].diff()
-        gain = delta.where(delta > 0, 0).rolling(14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
-        RS = gain / loss
-        df["RSI"] = 100 - (100 / (1 + RS))
-
+        gain = delta.where(delta>0,0).rolling(14).mean()
+        loss = (-delta.where(delta<0,0)).rolling(14).mean()
+        RS = gain/loss
+        df["RSI"] = 100 - (100/(1+RS))
         ema12 = df["Close"].ewm(span=12, adjust=False).mean()
         ema26 = df["Close"].ewm(span=26, adjust=False).mean()
         df["MACD"] = ema12 - ema26
         df["Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
-
         df["Buy"] = (df["SMA20"] > df["SMA50"]) & (df["MACD"] > df["Signal"])
         df["Sell"] = (df["SMA20"] < df["SMA50"]) & (df["MACD"] < df["Signal"])
 
