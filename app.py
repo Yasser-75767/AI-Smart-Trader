@@ -1,57 +1,71 @@
 import streamlit as st
 import yfinance as yf
-import plotly.graph_objects as go
 import pandas as pd
+import plotly.graph_objects as go
 
-st.title("🎯 AI Smart Trader — الرسم و الشموع اليابانية")
+# =========================
+# واجهة التطبيق
+# =========================
+st.title("🎯 AI Smart Trader — نسخة الشموع اليابانية")
 
-# --- اختيار السهم ---
-symbol = st.text_input("أدخل رمز السهم", "AAPL")
+symbol = st.text_input("اختر الأصل (رمز السهم)", "AAPL")
 
-# --- اختيار التواريخ ---
-start_date = st.date_input("تاريخ البداية", pd.to_datetime("2020-11-28"))
-end_date = st.date_input("تاريخ النهاية", pd.to_datetime("2025-11-28"))
+start_date = st.date_input("تاريخ البداية")
+end_date = st.date_input("تاريخ النهاية")
 
-# --- تحميل البيانات ---
-df = yf.download(symbol, start=start_date, end=end_date)
+chart_type = st.selectbox(
+    "اختر نوع الرسم:",
+    ["الشموع اليابانية", "الرسم الخطي"]
+)
 
-if df.empty:
-    st.error("⚠ لا توجد بيانات لهذا السهم أو التاريخ غير صحيح")
-    st.stop()
+# =========================
+# تحميل البيانات
+# =========================
+if st.button("📥 جلب البيانات"):
+    with st.spinner("جارِ تحميل البيانات..."):
+        df = yf.download(symbol, start=start_date, end=end_date)
 
-# تجهيز البيانات
-df = df[['Open', 'High', 'Low', 'Close', 'Volume']]
-df.reset_index(inplace=True)
+    if df is None or df.empty:
+        st.error("❌ لم يتم العثور على بيانات!")
+        st.stop()
 
-# --- اختيار نوع الرسم ---
-chart_type = st.radio("اختر نوع الرسم", ["الشموع اليابانية", "الرسم البياني العادي"])
+    st.success("✅ تم تحميل البيانات بنجاح!")
 
-st.write("### 📊 الرسم:")
+    # =========================
+    # عرض الجدول
+    # =========================
+    st.subheader("📊 جدول الأسعار")
+    st.dataframe(df.tail(100))
 
-# --- الشموع اليابانية ---
-if chart_type == "الشموع اليابانية":
-    fig = go.Figure(data=[go.Candlestick(
-        x=df['Date'],
-        open=df['Open'],
-        high=df['High'],
-        low=df['Low'],
-        close=df['Close']
-    )])
-    fig.update_layout(title=f"Candlestick — {symbol}", xaxis_title="التاريخ", yaxis_title="السعر")
-    st.plotly_chart(fig, use_container_width=True)
+    # =========================
+    # رسم الشموع اليابانية
+    # =========================
+    if chart_type == "الشموع اليابانية":
+        fig = go.Figure(
+            data=[
+                go.Candlestick(
+                    x=df.index,
+                    open=df["Open"],
+                    high=df["High"],
+                    low=df["Low"],
+                    close=df["Close"]
+                )
+            ]
+        )
 
-# --- الرسم البياني العادي ---
-else:
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df['Date'],
-        y=df['Close'],
-        mode='lines',
-        name='Close'
-    ))
-    fig.update_layout(title=f"Line Chart — {symbol}", xaxis_title="التاريخ", yaxis_title="السعر")
-    st.plotly_chart(fig, use_container_width=True)
+        fig.update_layout(
+            title="📉 الشموع اليابانية",
+            xaxis_title="التاريخ",
+            yaxis_title="السعر",
+            template="plotly_dark",
+            height=600
+        )
 
-# --- جدول البيانات ---
-st.write("### 📁 جدول الأسعار (آخر 100 يوم)")
-st.dataframe(df.tail(100))
+        st.plotly_chart(fig, use_container_width=True)
+
+    # =========================
+    # الرسم الخطي
+    # =========================
+    else:
+        st.subheader("📈 الرسم الخطي للسعر")
+        st.line_chart(df["Close"])
