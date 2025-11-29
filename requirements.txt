@@ -1,8 +1,6 @@
 streamlit
 yfinance
 pandas
-numpy
-scikit-learn
-xgboost
-ta
 plotly
+authlib
+python-dotenv
